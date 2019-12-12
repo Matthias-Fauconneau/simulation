@@ -1,0 +1,13 @@
+[package]
+name = "cfd"
+version = "0.0.0"
+authors = ["Matthias Fauconneau <matthias.fauconneau@gmail.com>"]
+edition = "2018"
+links = "umfpack"
+
+[build-dependencies]
+bindgen = ""
+
+[dependencies]
+framework = { path = "framework" }
+dimensioned = ""
