@@ -1,4 +1,3 @@
-//extern crate bindgen;
 fn main() {
     println!("cargo:rustc-link-lib=umfpack");
     println!("cargo:rerun-if-changed=wrapper.h");

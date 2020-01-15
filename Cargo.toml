@@ -9,5 +9,4 @@ links = "umfpack"
 bindgen = ""
 
 [dependencies]
-framework = { path = "framework" }
-dimensioned = ""
+framework = { path = "framework", default-features = false, features = ["const_generics","compose"] }
