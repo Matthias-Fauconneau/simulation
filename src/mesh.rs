@@ -3,19 +3,24 @@ use crate::algebra;
 
 pub type Mesh = size2;
 pub type Operator<const M:Mesh> = Box<dyn algebra::Matrix<{M.x*M.y}>>;
-pub struct Equation<const M:Mesh> { A : algebra::LU<{M.x*M.y}>, B : Operator<M> } // Ax = Bx' + ...
+pub struct Equation<const M:Mesh> {pub A : algebra::LU<{M.x*M.y}>, pub B : Operator<M>} // Ax = Bx' + ...
 type DenseField<T=f32,const M:Mesh> = algebra::DenseVector<T,{M.x*M.y}>;
 pub type Field<T=f32,const M:Mesh> = DenseField<T,M>;
 
 fn div_remu(n : u32, d : u32) -> (u32, u32) { (n/d, n%d) }
 fn div_rem(n : i32, d : u32) -> (i32, i32) { (n/d as i32, n%d as i32) }
-fn map<T,F:Fn(uint2)->T,const M:Mesh>(f : F) -> impl algebra::SizedVector<T,{M.x*M.y}> { move |i|{ f(div_remu(i,M.x).into()) } }
-pub fn field<T,F:Fn(uint2)->T,const M:Mesh>(f : F) -> algebra::DenseVector<T,{M.x*M.y}> { algebra::collect(map(M,f)) }
-//fn operator<F:Fn(uint2, int2)->f32,const N:u32>(M:size2, f : F) -> impl algebra::Matrix<N> { move |i,j| { f(div_remu(i,M.x).into(), div_rem(j as i32 - i as i32, M.x).into()) } }
-//fn op<'a,F:Fn(uint2,int2)->f32+'a, const N:u32>(M:size2, f : F) -> framework::compose::RcFn<'a,(u32, u32),f32> { framework::compose::RcFn::new::<F>(operator(M,f)) }
-pub fn op<F:Fn(uint2,int2)->f32+'static, const M:Mesh>(f : F) -> framework::compose::RcFn<'static,(u32, u32),f32> { 
+
+//pub fn field<T,F:Fn(uint2)->T,const M:Mesh>(f : F) -> impl algebra::SizedVector<T,{M.x*M.y}> { move |i|{ f(div_remu(i,M.x).into()) } } // cycle
+pub fn field<T,F:Fn(uint2)->T,const M:Mesh>(f : F) -> impl Fn(u32)->T { move |i|{ f(div_remu(i,M.x).into()) } }
+
+// cycle
+//fn operator<F:Fn(uint2, int2)->f32, const M:Mesh>(f : F) -> impl algebra::Matrix<{M.x*M.y}> { move |i,j| { f(div_remu(i,M.x).into(), div_rem(j as i32 - i as i32, M.x).into()) } }
+fn operator<F:Fn(uint2, int2)->f32, const M:Mesh>(f : F) -> impl Fn(u32,u32)->f32 { move |i,j| { f(div_remu(i,M.x).into(), div_rem(j as i32 - i as i32, M.x).into()) } }
+pub fn op<F:Fn(uint2,int2)->f32+'static, const M:Mesh>(f : F) -> framework::compose::RcFn<'static,(u32, u32),f32> { framework::compose::RcFn::new(operator(f)) }
+/*pub fn op<F:Fn(uint2,int2)->f32+'static, const M:Mesh>(f : F) -> framework::compose::RcFn<'static,(u32, u32),f32> { 
     framework::compose::RcFn::new( move |i,j| { f(div_remu(i,M.x).into(), div_rem(j as i32 - i as i32, M.x).into()) } )
-}
+}*/
+
 pub fn eq<A:algebra::Matrix<M>, B:algebra::Matrix<M>+'static, const M:Mesh>(A:A, B:B) -> Equation<M> { Equation{ A: algebra::LU::new(A), B: box B } }
 
 pub fn identity(d:int2) -> f32 { mask(d==0, 1.) }

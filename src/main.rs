@@ -1,6 +1,6 @@
 #![allow(incomplete_features,uncommon_codepoints)]#![feature(const_generics,non_ascii_idents,fn_traits,unboxed_closures,trait_alias,box_syntax)]
-//use std::mem::swap; 
-use framework::{core::{Zero,mask,sign,abs,sq,cb,sqrt}, vector::{xy,uint2,vec2}};
+use std::{/*mem::swap,*/ cmp::max}; 
+use framework::{core::{Zero,mask,sign,abs,sq,cb,sqrt}, vector::{xy,uint2,size2,vec2}};
 mod algebra;
 mod mesh; use mesh::{Mesh, Operator,Equation,Field, op,eq,field, identity,BCx,BCy};
 
@@ -15,14 +15,14 @@ struct System<const M:Mesh> {
 impl<const M:Mesh> System<M> {
     fn new(δt : f32, Pr : f32, Ra : f32) -> Self {
         let I = &op::<_,M>(|_,d| { identity(d) });
-        let border = |M,xy{x,y}| -> bool { x==0 || x==M.x-1 || y==0 || y==M.y-1 };
+        let border = |M:size2,xy{x,y}| -> bool { x==0 || x==M.x-1 || y==0 || y==M.y-1 };
         let interior = |M,p:uint2,predicate:bool,value:f32| -> f32 { mask(predicate && !border(M,p), value) };
         let P = &op::<_,M>(|p,d| { interior(M,p, d==0, 1.) });
         
         let δ = vec2{x: 1./(M.x as f32), y: 1./(M.y as f32) };  // : vec2 = 1f32/M.into();
-        let D = xy{ x:&op(M,|p,d| { interior(M,p, (abs(d.x),d.y) == (1,0), sign(d.x) as f32/(2.*δ.x)) }), // ∂x
-                        y:&op(M,move |p,d| { interior(M,p, (d.x,abs(d.y)) == (0,1), sign(d.y) as f32/(2.*δ.y)) })}; // ∂y
-        let Δ = &op(M,move |p,d| { interior(M,p, true, {
+        let D = xy{ x:&op::<_,M>(|p,d| { interior(M,p, (abs(d.x),d.y) == (1,0), sign(d.x) as f32/(2.*δ.x)) }), // ∂x
+                        y:&op::<_,M>(|p,d| { interior(M,p, (d.x,abs(d.y)) == (0,1), sign(d.y) as f32/(2.*δ.y)) })}; // ∂y
+        let Δ = &op::<_,M>(|p,d| { interior(M,p, true, {
             match (abs(d.x),abs(d.y)) {
                 (0,0) => -2.*(1./sq(δ.x)+1./sq(δ.y)),
                 (1,0) => 1./sq(δ.x),
@@ -34,7 +34,7 @@ impl<const M:Mesh> System<M> {
         let BC_T = op::<_,M>(|p,d| { if p.x==0 || p.x==M.x-1 { identity(d) } else { BCy(-1., [-3.,4.,-1.],M,p,d)/2. } }); // constant value on vertical, derivative on horizontal
         let ωφ = box op::<_,M>(|p,d| { let thom=[0.,-8.,1.]; (if p.x==0 || p.x==M.x-1 { BCx } else { BCy })(1.,thom,M,p,d) }); // Thom horizontal
         let BC_𝜓 = op::<_,M>(|p,d| { mask(border(M,p) && d==0, 1.) }); // Constant boundary condition for advection (coefficients)
-        let 𝜓_G = box move |p| { mask(border(M,p), (p.x as f32/(M.x-1) as f32, p.y as f32/(M.y-1) as f32)) }; // Constant boundary condition for advection (= source constants)
+        let 𝜓_G = box field::<_,_,M>(|p|mask(border(M,p), (p.x as f32/(M.x-1) as f32, p.y as f32/(M.y-1) as f32))); // Constant boundary condition for advection (= source constants)
         
         Self{D:xy{x:box D.x, y:box D.y}, //box D,
             T: eq(P      - (δt/2.)*Δ + BC_T  ,      P + δt/2.*Δ     ),
@@ -54,7 +54,7 @@ impl<const M:Mesh> Zero for Tω𝜓<M>{ fn zero() -> Self {Self{T:Zero::zero(),�
 //impl<const N:u32> std::ops::Mul<&Tω𝜓<N>> for Op<'_> { type Output=Tω𝜓<N>; fn mul(self, b: &Tω𝜓<N>) -> Self::Output { mul(self, b) } }
 //impl<const N:u32> std::ops::Mul<&mut Tω𝜓<N>> for Op<'_> { type Output=Tω𝜓<N>; fn mul(self, b: &mut Tω𝜓<N>) -> Self::Output { mul(self, b) } }
 
-#[allow(non_camel_case_types)] struct φA<const M:Mesh> { φ: Field<M>, A: Tω𝜓<M> }
+#[allow(non_camel_case_types)] struct φA<const M:Mesh> { φ: Field<f32,M>, A: Tω𝜓<M> }
 impl<const M:Mesh> Zero for φA<M> { fn zero() -> Self {Self{φ:Field::<f32,M>::zero(), A:Zero::zero()}} } // fixme: #[derive(Zero)]
 struct State<const M:Mesh> {
     φA : [φA<M>; 2], // [previous,current] {stream function, non-linear advection term}
@@ -62,7 +62,7 @@ struct State<const M:Mesh> {
 }
 impl<const M:Mesh> Zero for State<M> { fn zero() -> Self {Self{φA:Zero::zero(), C:Zero::zero()}} } // fixme: #[derive(Zero)]
 impl<const M:Mesh> State<M> {
-    fn new() -> Self { Self{C:Tω𝜓{ 𝜓:field(M, |p:uint2|->vec2 { p.as_f32() / (M-1.into()).as_f32() }), ..Zero::zero() }, ..Zero::zero()} }
+    fn new() -> Self { Self{C:Tω𝜓{ 𝜓:algebra::collect(field::<_,_,M>( |p:uint2|->vec2 { p.as_f32() / (M-1.into()).as_f32() })), ..Zero::zero() }, ..Zero::zero()} }
     fn update(&mut self, system : &System<M>, _δt : f32) {
         let _A = system.T.B*self.C.T;
         //let _A = system.T.B(self.C.T);
@@ -95,22 +95,21 @@ fn parameters() -> Parameters {
     let ΔT : Temperature = 1.0 |K; // Difference between walls
     let β : ThermalExpansion = 1./(300.|K); //K¯¹: Ideal gas
     let g : Acceleration = 9.8 |m_s2; //m/s²: Gravity
-    let L : Length = 0.1 |m; // Box side
+    let L : Length = 0.1 |m; // Box length
     //let t : Time = sq(L)/α; //L²/α s: Box thermal diffusion time
     let ν : KinematicViscosity = η/ρ; //m²/s
-    Parameters{Pr: ν/α, //Prandtl: kinematic/thermal diffusivity
-                        Ra: (ΔT*β*g*cb(L))/(ν*α) //ΔT·β·g·L³/(ν·α) Rayleigh: Laminar/turbulent flow
+    Parameters{Pr: (ν/α).into(), //Prandtl: kinematic/thermal diffusivity
+                        Ra: ((ΔT*β*g*cb(L))/(ν*α)).into() //ΔT·β·g·L³/(ν·α) Rayleigh: Laminar/turbulent flow
     }
 }
 
 fn main() {
-    pub const R : u32 = 128; // Resolution
-    pub const M : uint2 = xy{x:R+1, y:R+1};
+    const M : Mesh = xy{x:128, y:128};
     let Parameters{Pr,Ra} = parameters();
-    let δt : f32 = 1./(R as f32*sqrt(Ra)); //R·√Ra 1: Temporal resolution
-    let system = System::<M>::new(δt, Pr, Ra);
-    let mut state = State::new();
-    state.update(&system, δt);
+    let δt : f32 = 1./(max(M.x,M.y) as f32*sqrt(Ra)); //R·√Ra 1: Temporal resolution
+    let system = System::<{M}>::new(δt, Pr, Ra);
+    //let mut state = State::new();
+    //state.update(&system, δt);
     /* subplot(position, size, 4, 0, Cw, Mx, My, "Vorticity ω"_);
         subplot(position, size, 4, 1, Ux, Uy, Mx, My, "Velocity u"_);
         subplot(position, size, 4, 2, positiveToImage(Ct, Mx, My), "Temperature T"_);

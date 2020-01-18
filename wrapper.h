@@ -1,1 +1,1 @@
-#include <suitesparse/umfpack.h>
+#include <umfpack.h>
