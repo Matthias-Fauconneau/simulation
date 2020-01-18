@@ -1,6 +1,42 @@
+/*#![allow(incomplete_features)]#![feature(const_generics)]
+
+// Works
+
+#[derive(PartialEq, Eq)] struct GenericOneFieldStruct<T>{x:T}
+struct ConstGenericOneFieldStruct<const M:GenericOneFieldStruct<u32>> {}
+
+struct ConstTwoParameters<const Mx:u32,const My:u32> {}
+
+//expected `ByRef { alloc: Allocation { bytes: [0, 0, 0, 0, 0, 0, 0, 0], relocations: Relocations(SortedMap { data: [] }), undef_mask: UndefMask { blocks: [255], len: Size { raw: 8 } }, size: Size { raw: 8 }, align: Align { pow2: 2 }, mutability: Not, extra: () }, offset: Size { raw: 0 } } : (u32, u32)`,
+//      found `ByRef { alloc: Allocation { bytes: [0, 0, 0, 0, 0, 0, 0, 0], relocations: Relocations(SortedMap { data: [] }), undef_mask: UndefMask { blocks: [255], len: Size { raw: 8 } }, size: Size { raw: 8 }, align: Align { pow2: 2 }, mutability: Not, extra: () }, offset: Size { raw: 0 } } : (u32, u32)`
+struct ConstTuple<const M:(u32,u32)> {}
+
+//struct ConstGenericTuple<T:PartialEq+Eq,const M:(T,T)> {}
+
+#[derive(PartialEq,Eq)] struct TwoFieldStruct {pub x:u32, pub y:u32}
+struct ConstTwoFieldStruct<const M:TwoFieldStruct> {}
+
+#[derive(PartialEq, Eq)] struct TupleStruct(u32,u32);
+struct ConstTupleStruct<const M:TupleStruct> {}
+#[derive(PartialEq, Eq)] struct GenericTupleStruct<T>(T,T);
+struct ConstGenericTupleStruct<const M:GenericTupleStruct<u32>> {}
+#[derive(PartialEq, Eq)] struct GenericTwoFieldStruct<T>{x:T, y:T}
+struct ConstGenericTwoFieldStruct<const M:GenericTwoFieldStruct<u32>> {}
+
+fn main() { 
+    let _ = ConstGenericOneFieldStruct::<{GenericOneFieldStruct{x:0}}>{}; 
+    let _ = ConstTwoParameters::<0,0>{};
+    let _ = ConstTuple::<{(0,0)}>{}; 
+    //let _ = ConstGenericTuple::<{(0,0)}>{}; 
+    let _ = ConstTwoFieldStruct::<{TwoFieldStruct{x:0,y:0}}>{}; 
+    let _ = ConstTupleStruct::<{TupleStruct(0,0)}>{}; 
+    let _ = ConstGenericTupleStruct::<{GenericTupleStruct(0,0)}>{}; 
+    let _ = ConstGenericTwoFieldStruct::<{GenericTwoFieldStruct{x:0,y:0}}>{}; 
+}*/
+
 #![allow(incomplete_features,uncommon_codepoints)]#![feature(const_generics,non_ascii_idents,fn_traits,unboxed_closures,trait_alias,box_syntax)]
 use std::{/*mem::swap,*/ cmp::max}; 
-use framework::{core::{Zero,mask,sign,abs,sq,cb,sqrt}, vector::{xy,uint2,size2,vec2}};
+use framework::{core::{Zero,mask,sign,abs,sq,cb,sqrt}, vector::{xy,uint2,vec2}};
 mod algebra;
 mod mesh; use mesh::{Mesh, Operator,Equation,Field, op,eq,field, identity,BCx,BCy};
 
@@ -15,7 +51,7 @@ struct System<const M:Mesh> {
 impl<const M:Mesh> System<M> {
     fn new(δt : f32, Pr : f32, Ra : f32) -> Self {
         let I = &op::<_,M>(|_,d| { identity(d) });
-        let border = |M:size2,xy{x,y}| -> bool { x==0 || x==M.x-1 || y==0 || y==M.y-1 };
+        let border = |M:Mesh,xy{x,y}| -> bool { x==0 || x==M.x-1 || y==0 || y==M.y-1 };
         let interior = |M,p:uint2,predicate:bool,value:f32| -> f32 { mask(predicate && !border(M,p), value) };
         let P = &op::<_,M>(|p,d| { interior(M,p, d==0, 1.) });
         
@@ -104,10 +140,11 @@ fn parameters() -> Parameters {
 }
 
 fn main() {
-    const M : Mesh = xy{x:128, y:128};
+    const M : Mesh = Mesh{x:128, y:128};
     let Parameters{Pr,Ra} = parameters();
     let δt : f32 = 1./(max(M.x,M.y) as f32*sqrt(Ra)); //R·√Ra 1: Temporal resolution
-    let system = System::<{M}>::new(δt, Pr, Ra);
+    //let system = System::<{M}>::new(δt, Pr, Ra);
+    let system = System::<{(M.x,M.y)}>::new(δt, Pr, Ra);
     //let mut state = State::new();
     //state.update(&system, δt);
     /* subplot(position, size, 4, 0, Cw, Mx, My, "Vorticity ω"_);

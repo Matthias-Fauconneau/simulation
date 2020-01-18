@@ -1,16 +1,17 @@
 use framework::core::Zero;
 
-trait Dot { fn dot<A:Fn(u32)->f32, B:Fn(u32)->f32>(self, a : A, b : B) -> f32; }
-impl Dot for std::ops::Range<u32> { fn dot<A:Fn(u32)->f32, B:Fn(u32)->f32>(self, a : A, b : B) -> f32 { self.map(|k| a(k) * b(k)).sum() } }
-impl Dot for std::ops::RangeTo<u32> { fn dot<A:Fn(u32)->f32, B:Fn(u32)->f32>(self, a : A, b : B) -> f32 { (0..self.end).dot(a,b) } }
+trait Dot { fn dot<A:Fn(u32)->f32, B:Fn(u32)->f32>(self, a : &A, b : &B) -> f32; }
+impl Dot for std::ops::Range<u32> { fn dot<A:Fn(u32)->f32, B:Fn(u32)->f32>(self, a : &A, b : &B) -> f32 { self.map(|k| a(k) * b(k)).sum() } }
+impl Dot for std::ops::RangeTo<u32> { fn dot<A:Fn(u32)->f32, B:Fn(u32)->f32>(self, a : &A, b : &B) -> f32 { (0..self.end).dot(a,b) } }
 
-pub trait SizedVector<T=f32,const N:u32> = Fn(u32)->T; //Fn<(u32,),Output=T>;
+//pub trait SizedVector<T=f32,const N:u32> = Fn(u32)->T;
+pub trait SizedVector<T=f32,const N:u32> = Fn<(u32,),Output=T>;
 pub trait Vector<T=f32,const N:u32> = SizedVector<T,N>;
 
-trait DotN { fn dot<A:Fn(u32)->f32, B:Fn(u32)->f32,const N:u32>(self, a : A, b : B) -> f32; }
-impl DotN for std::ops::RangeFrom<u32> { fn dot<A:SizedVector<f32,N>, B:SizedVector<f32,N>, const N:u32>(self, a : A, b : B) -> f32 { (self.start..N).dot(a,b) } }
-pub fn dot<A:SizedVector<N>, B:SizedVector<N>, const N:u32>(a : A, b : B) -> f32 { (..).dot(a,b) }
-//pub fn dot<A:SizedVector<N>, B:SizedVector<N>, N>(a : A, b : B) -> f32 { (0..N).dot(a,b) }
+trait DotN { fn dot<A:Fn(u32)->f32, B:Fn(u32)->f32,const N:u32>(self, a : &A, b : &B) -> f32; }
+impl DotN for std::ops::RangeFrom<u32> { fn dot<A:SizedVector<f32,N>, B:SizedVector<f32,N>, const N:u32>(self, a : &A, b : &B) -> f32 { (self.start..N).dot(a,b) } }
+impl DotN for std::ops::RangeFull { fn dot<A:SizedVector<f32,N>, B:SizedVector<f32,N>, const N:u32>(self, a : &A, b : &B) -> f32 { (0..).dot(a,b) } }
+pub fn dot<A:SizedVector<N>, B:SizedVector<N>, const N:u32>(a : &A, b : &B) -> f32 { (..).dot(a,b) }
 
 pub struct Array<T=f32, const N:u32>([T; N as usize]);
 pub type DenseVector<T=f32, const N:u32> = Array<T,N>;
@@ -22,22 +23,53 @@ impl<T:Copy,const N:u32> FnOnce<(u32,)> for Array<T,N> { type Output=T;  extern 
 impl<T:Copy,const N:u32> FnMut<(u32,)> for Array<T,N> { extern "rust-call" fn call_mut(&mut self, args: (u32,)) -> Self::Output { self.call(args) } }
 impl<T:Copy,const N:u32> Fn<(u32,)> for Array<T,N> { extern "rust-call" fn call(&self, args: (u32,)) -> Self::Output { self[args.0] } }
 
-pub fn collect<T, F:Vector<T,N>, const N:u32>(f : F) -> Array<T, N> { Array(framework::core::array::collect(|i|f(i as u32))) }
+pub fn collect<T, F:SizedVector<T,N>, const N:u32>(f : F) -> Array<T, N> { Array(framework::core::array::collect(|i|f(i as u32))) }
 impl<T:Zero, const N : u32> Zero for Array<T,N> { fn zero() -> Self { collect(|_|Zero::zero()) } }
 
-pub trait Matrix<const N:u32> = Fn(u32,u32)->f32;
+pub trait Matrix<T=f32,const N:u32> = Fn(u32,u32)->T;
+/*pub trait Matrix<T=f32,const N:u32> : Fn(u32,u32)->f32 {
+    fn line(&self, i : u32) -> impl Vector<T,N> + '_ { move |j| self(i, j) }
+}*/
+/*impl<T,M:Matrix<T,N>,const N:u32> M {
+    fn line(&self, i : u32) -> impl Vector<T,N> + '_ { move |j| self(i, j) }
+}*/
 
-impl<T,const N:u32> std::ops::Mul<DenseVector<T,N>> for dyn Matrix<N> {  
+/*impl<T,const N:u32> std::ops::Mul<DenseVector<T,N>> for &dyn Matrix<N> {  
     type Output = DenseVector<T,N>;
     fn mul(self, b:DenseVector<T,N>) -> Self::Output { collect(|i| dot(self.line(i), b)) }
+}*/
+
+impl<const N:u32> std::ops::Mul<DenseVector<f32,N>> for &dyn Matrix<f32,N> {  
+    type Output = DenseVector<f32,N>;
+    //fn mul(self, b:DenseVector<f32,N>) -> Self::Output { collect(|i| (..N).dot(&MatrixType(self).line(i), &b) ) }
+    fn mul(self, b:DenseVector<f32,N>) -> Self::Output { collect(|i| (..N).dot(&|j| self(i, j), &b) ) }
 }
+
+//struct MatrixType<T=f32,const N:u32>(dyn Matrix<T,N>);
+/*struct MatrixType<'a,T=f32,const N:u32>(&'a dyn Matrix<T,N>);
+impl<T,const N:u32> MatrixType<'_,T,N> {
+    fn line(&self, i : u32) -> impl Vector<T,N> + '_ { move |j| self.0(i, j) }
+}
+impl<T,const N:u32> std::ops::Mul<DenseVector<T,N>> for MatrixType<'_,T,N> {  
+    type Output = DenseVector<T,N>;
+    fn mul(self, b:DenseVector<T,N>) -> Self::Output { collect(|i| dot(self.line(i), b)) }
+}*/
+
 use std::ops::Mul;
 //impl<T,const N:u32> Mul<DenseVector<T,N>> for Box<dyn Mul<DenseVector<T,N>>> {  
 //impl<T,const N:u32> Mul<DenseVector<T,N>> for Box<dyn Mul<DenseVector<T,N>,Output=DenseVector<T,N>>> {  
-impl<T,const N:u32> Mul<DenseVector<T,N>> for Box<dyn Matrix<N>> {  
-    type Output = <dyn Matrix<N> as std::ops::Mul<DenseVector<T,N>>>::Output;
-    fn mul(self, b:DenseVector<T,N>) -> Self::Output { self.mul(b) }
+impl<const N:u32> Mul<DenseVector<f32,N>> for Box<dyn Matrix<f32,N>> {  
+    type Output = <&'static dyn Matrix<f32,N> as std::ops::Mul<DenseVector<f32,N>>>::Output;
+    fn mul(self, b:DenseVector<f32,N>) -> Self::Output { self.mul(b) }
 }
+/*impl<T,const N:u32> Mul<DenseVector<T,N>> for Box<MatrixType<T,N>> {  
+    type Output = <MatrixType<T,N> as std::ops::Mul<DenseVector<T,N>>>::Output;
+    fn mul(self, b:DenseVector<T,N>) -> Self::Output { self.mul(b) }
+}*/
+/*impl<T,const N:u32> Mul<DenseVector<T,N>> for Box<MatrixType<T,N>> {  
+    type Output = <&'static dyn Matrix<T,N> as std::ops::Mul<DenseVector<T,N>>>::Output;
+    fn mul(self, b:DenseVector<T,N>) -> Self::Output { self.mul(b) }
+}*/
 
 pub struct SparseVector<T=f32,const N : u32> {
     indices : Vec<u32>,
@@ -76,16 +108,16 @@ impl<const N:u32> LU<N> {
     pub fn new<M:Matrix<N>>(A : M) -> Self {
         let mut LU = CSC::zero();
         for i in 0..N {
-            for j in i..N { LU.set(i, j, A(i, j) - (..i).dot(LU.line(i), LU.column(j))); }
-            for j in i+1..N { LU.set(j, i,  (1. / LU(i, i)) * (A(j, i) - (..i).dot(LU.line(i), LU.column(j)))); }
+            for j in i..N { LU.set(i, j, A(i, j) - (..i).dot(&LU.line(i), LU.column(j))); }
+            for j in i+1..N { LU.set(j, i,  (1. / LU(i, i)) * (A(j, i) - (..i).dot(&LU.line(i), LU.column(j)))); }
         }
         LU // L+U-I
     }
     pub fn solve<B:SizedVector<f32,N>>(&self, b:B) -> Array<f32,N> {
         let mut y : Array<f32,N> = Zero::zero(); // Ly = b
-        for i in 0..N { y[i] = b(i) - (..i).dot(self.line(i), &y); }
+        for i in 0..N { y[i] = b(i) - (..i).dot(&self.line(i), &y); }
         let mut x : Array<f32,N> = Zero::zero(); // Ux = y
-        for i in N-1..=0 { x[i] = (1. / self(i, i)) * (y[i] - (i+1..N).dot(self.line(i), &x)); }
+        for i in N-1..=0 { x[i] = (1. / self(i, i)) * (y[i] - (i+1..N).dot(&self.line(i), &x)); }
         x
     }
 }
