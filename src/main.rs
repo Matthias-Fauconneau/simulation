@@ -1,124 +1,91 @@
-/*#![allow(incomplete_features)]#![feature(const_generics)]
+#![allow(incomplete_features,dead_code,non_snake_case)]
+#![feature(const_generics,non_ascii_idents,fn_traits,unboxed_closures,trait_alias,const_compare_raw_pointers,box_syntax,option_unwrap_none)]
+use std::cmp::max;
+use framework::{core::{Zero,mask,cb,sqrt}, vector::{xy,uint2,vec2}};
+mod compose; use compose::BoxFn;
+mod algebra; use algebra::Idx;
+mod mesh; use mesh::{Mesh,Equation,Field,Operators};
 
-// Works
+struct Quantity<T=f32,const M:Mesh> { S : Field<T,M>, A : [Field<T,M>; 2] }
+impl<T:Zero, const M:Mesh> Quantity<T,M> { fn new<S0:Fn(uint2)->T>(s0: S0) -> Self { Self{S:algebra::collect(|i|s0(mesh::mesh::<M>(i))), A:Zero::zero() } } }
+impl<T,const M:Mesh> Operators<M> for Quantity<T,M> {}
+fn mul(a:f32, b:f32) -> f32 { a*b }
+impl<T:Zero+Copy+std::ops::Add<Output=T>+std::iter::Sum+'static, const M:Mesh> Quantity<T,M> where f32:std::ops::Mul<T,Output=T> {
+    fn step<G:Fn(Idx)->T>(&mut self, E:&Equation<T,M>, δt:f32, g:&G) where T:std::ops::Sub<Output=T> {
+        // 2-step Adams-Bashforth:  y[2] = y[1] + 3/2·δt·A(t[1],y[1]) - 1/2·δt·A(t[0],y[0])
+        let b : Field<T,M> = {
+            let BS = ((E.B)())(&self.S);
+            algebra::collect(|i| BS(i) + (mul(3.,δt)/2.)*self.A[1][i] - (δt/2.)*self.A[0][i] + g(i))
+        };
+        self.S = E.A.solve(b)
+    }
+    fn advect(&mut self, U:&xy<Field<f32,M>>) where Self:Operators<M> {
+        self.A.swap(0, 1);
+        //self.A[1] = algebra::collect((&U.x*&Self::operator::<_,{Self::Dx}> + &U.y*&Self::operator::<_,{Self::Dy}>)(&self.S));
+        self.A[1] = algebra::collect((&U.x*&Self::operator(Self::Dx) + &U.y*&Self::operator(Self::Dy))(&self.S));
+    }
+}
 
-#[derive(PartialEq, Eq)] struct GenericOneFieldStruct<T>{x:T}
-struct ConstGenericOneFieldStruct<const M:GenericOneFieldStruct<u32>> {}
-
-struct ConstTwoParameters<const Mx:u32,const My:u32> {}
-
-//expected `ByRef { alloc: Allocation { bytes: [0, 0, 0, 0, 0, 0, 0, 0], relocations: Relocations(SortedMap { data: [] }), undef_mask: UndefMask { blocks: [255], len: Size { raw: 8 } }, size: Size { raw: 8 }, align: Align { pow2: 2 }, mutability: Not, extra: () }, offset: Size { raw: 0 } } : (u32, u32)`,
-//      found `ByRef { alloc: Allocation { bytes: [0, 0, 0, 0, 0, 0, 0, 0], relocations: Relocations(SortedMap { data: [] }), undef_mask: UndefMask { blocks: [255], len: Size { raw: 8 } }, size: Size { raw: 8 }, align: Align { pow2: 2 }, mutability: Not, extra: () }, offset: Size { raw: 0 } } : (u32, u32)`
-struct ConstTuple<const M:(u32,u32)> {}
-
-//struct ConstGenericTuple<T:PartialEq+Eq,const M:(T,T)> {}
-
-#[derive(PartialEq,Eq)] struct TwoFieldStruct {pub x:u32, pub y:u32}
-struct ConstTwoFieldStruct<const M:TwoFieldStruct> {}
-
-#[derive(PartialEq, Eq)] struct TupleStruct(u32,u32);
-struct ConstTupleStruct<const M:TupleStruct> {}
-#[derive(PartialEq, Eq)] struct GenericTupleStruct<T>(T,T);
-struct ConstGenericTupleStruct<const M:GenericTupleStruct<u32>> {}
-#[derive(PartialEq, Eq)] struct GenericTwoFieldStruct<T>{x:T, y:T}
-struct ConstGenericTwoFieldStruct<const M:GenericTwoFieldStruct<u32>> {}
-
-fn main() { 
-    let _ = ConstGenericOneFieldStruct::<{GenericOneFieldStruct{x:0}}>{}; 
-    let _ = ConstTwoParameters::<0,0>{};
-    let _ = ConstTuple::<{(0,0)}>{}; 
-    //let _ = ConstGenericTuple::<{(0,0)}>{}; 
-    let _ = ConstTwoFieldStruct::<{TwoFieldStruct{x:0,y:0}}>{}; 
-    let _ = ConstTupleStruct::<{TupleStruct(0,0)}>{}; 
-    let _ = ConstGenericTupleStruct::<{GenericTupleStruct(0,0)}>{}; 
-    let _ = ConstGenericTwoFieldStruct::<{GenericTwoFieldStruct{x:0,y:0}}>{}; 
-}*/
-
-#![allow(incomplete_features,uncommon_codepoints)]#![feature(const_generics,non_ascii_idents,fn_traits,unboxed_closures,trait_alias,box_syntax)]
-use std::{/*mem::swap,*/ cmp::max}; 
-use framework::{core::{Zero,mask,sign,abs,sq,cb,sqrt}, vector::{xy,uint2,vec2}};
-mod algebra;
-mod mesh; use mesh::{Mesh, Operator,Equation,Field, op,eq,field, identity,BCx,BCy};
+mod BoundaryCondition {
+    use framework::core::{abs,mask};
+    pub fn constant(m:u32,p:u32, d:i32) -> f32 { assert!(p==0||p==m-1); mask(d==0, 1.) }
+    fn kernel<const C:[f32;3], const SYM:f32>(m:u32,p:u32,d:i32) -> f32 {
+        if (-(C.len() as i32)+1..C.len() as i32).contains(&d) {
+            if p==0 { C[d as usize] }
+            else if p==m-1 { SYM*C[(m-1-abs(d) as u32) as usize] }
+            else { panic!(); }
+        } else { 0. }
+    }
+    pub fn derivative(m:u32,p:u32, d:i32) -> f32 { kernel::<{[-3.,4.,-1f32]},-1f32>(m,p,d)/2. } // Boundary condition on derivative
+    pub fn Thom(m:u32,p:u32, d:i32) -> f32 { kernel::<{[0.,-8.,1f32]},1f32>(m,p,d) } // Thom boundary condition
+}
+use BoundaryCondition::*;
 
 struct System<const M:Mesh> {
-    D: xy<Operator<M>>,
-    T : Equation<M>, // Temperature
-    ω : Equation<M>, ωT : Operator<M>, ωφ : Operator<M>, // Vorticity
-    φ : Equation<M>, // Stream function (u=∇×φ)
-    𝜓 : Equation<M>, 𝜓_G : Box<dyn Fn(u32)->(f32,f32)>, // Color (visualization)
+    T : Equation<f32,M>, // Temperature
+    ω : Equation<f32,M>, // Vorticity
+        ωT : f32, // Boussinesq approximation in buoyancy-driven flows
+    φ : Equation<f32,M>, // Stream function (u=∇×φ)
+    C : Equation<vec2,M>, // Color (visualization)
 }
 
-impl<const M:Mesh> System<M> {
+impl<const M:Mesh> Operators<M> for System<M> {}
+impl<const M:Mesh> System<M> where Self:Operators<M> {
     fn new(δt : f32, Pr : f32, Ra : f32) -> Self {
-        let I = &op::<_,M>(|_,d| { identity(d) });
-        let border = |M:Mesh,xy{x,y}| -> bool { x==0 || x==M.x-1 || y==0 || y==M.y-1 };
-        let interior = |M,p:uint2,predicate:bool,value:f32| -> f32 { mask(predicate && !border(M,p), value) };
-        let P = &op::<_,M>(|p,d| { interior(M,p, d==0, 1.) });
-        
-        let δ = vec2{x: 1./(M.x as f32), y: 1./(M.y as f32) };  // : vec2 = 1f32/M.into();
-        let D = xy{ x:&op::<_,M>(|p,d| { interior(M,p, (abs(d.x),d.y) == (1,0), sign(d.x) as f32/(2.*δ.x)) }), // ∂x
-                        y:&op::<_,M>(|p,d| { interior(M,p, (d.x,abs(d.y)) == (0,1), sign(d.y) as f32/(2.*δ.y)) })}; // ∂y
-        let Δ = &op::<_,M>(|p,d| { interior(M,p, true, {
-            match (abs(d.x),abs(d.y)) {
-                (0,0) => -2.*(1./sq(δ.x)+1./sq(δ.y)),
-                (1,0) => 1./sq(δ.x),
-                (0,1) => 1./sq(δ.y),
-                _ => 0.
-            }
-        })});
-        
-        let BC_T = op::<_,M>(|p,d| { if p.x==0 || p.x==M.x-1 { identity(d) } else { BCy(-1., [-3.,4.,-1.],M,p,d)/2. } }); // constant value on vertical, derivative on horizontal
-        let ωφ = box op::<_,M>(|p,d| { let thom=[0.,-8.,1.]; (if p.x==0 || p.x==M.x-1 { BCx } else { BCy })(1.,thom,M,p,d) }); // Thom horizontal
-        let BC_𝜓 = op::<_,M>(|p,d| { mask(border(M,p) && d==0, 1.) }); // Constant boundary condition for advection (coefficients)
-        let 𝜓_G = box field::<_,_,M>(|p|mask(border(M,p), (p.x as f32/(M.x-1) as f32, p.y as f32/(M.y-1) as f32))); // Constant boundary condition for advection (= source constants)
-        
-        Self{D:xy{x:box D.x, y:box D.y}, //box D,
-            T: eq(P      - (δt/2.)*Δ + BC_T  ,      P + δt/2.*Δ     ),
-            ω: eq(I  - (Pr*δt/2.)*Δ               ,      P + Pr*δt/2.*Δ), ωT: box( Ra*Pr*δt/2.*D.x ), ωφ,
-            φ:  eq(I-P             + Δ               ,-1.*P                    ),
-            𝜓: eq(P - (Pr*δt/2.)*Δ + BC_𝜓,     P + Pr*δt/2.*Δ), 𝜓_G }
+        //let I=||BoxFn::new(Self::I); let P=||BoxFn::new(Self::P); let Δ=||BoxFn::new(Self::Δ);
+        let I=Self::I; let P=Self::P; let Δ=Self::Δ;
+        Self{
+            T: Self::eq(P()      - (δt/2.)*Δ() + Self::BC::<constant,derivative>,move||box(      Self::P() + (δt/2.)*Self::Δ()     )),
+            ω: Self::eq(I()  - (Pr*δt/2.)*Δ()                                                     ,move||box(      Self::P() + (Pr*δt/2.)*Self::Δ())), ωT: Ra*Pr/2.,
+            φ:  Self::eq(I()-P()             + Δ()                                                  ,move||box(-1.*Self::P()                         )),
+            C: Self::eq(P() - (Pr*δt/2.)*Δ() + Self::BC::<constant,constant>,move||box(      Self::P() + (Pr*δt/2.)*Self::Δ())),
+        }
     }
 }
 
-struct Tω𝜓<const M:Mesh> { T : Field<f32,M>, ω : Field<f32,M>, 𝜓 : Field<vec2,M> } 
-// ICE: Field<N>. const argument index assumes optional type argument was given and gets OOB ~ 67858
-impl<const M:Mesh> Zero for Tω𝜓<M>{ fn zero() -> Self {Self{T:Zero::zero(),ω:Zero::zero(),𝜓:Zero::zero()}} } // fixme: #[derive(Zero)]
-//impl<const N: u32> Zero for Tω𝜓<N>{ fn zero() -> Self {Self{T:Field::<f32,N>::zero(),ω:Field::<f32,N>::zero(),𝜓:Field::<vec2,N>::zero()}} } // fixme: Zero::zero()
-//fn mul<T:std::ops::Mul<Field<f32,N>>, const N:u32>(a: T, b: &Tω𝜓<N>) -> Tω𝜓<N> where <T as std::ops::Mul<Field<f32,N>>>::Output:Into<Field<f32,N>> { 
-//fn mul<const N:u32>(a: f32, b: &Tω𝜓<N>) -> Tω𝜓<N> { Tω𝜓::<N>{T: a*b.T, ω: a*b.ω, 𝜓: a*b.𝜓} }
-//fn mul<const N:u32>(a: f32, b: &Tω𝜓<N>) -> Tω𝜓<N> { Tω𝜓::<N>{T: a*b.T, ω: a*b.ω, 𝜓: a*operator::RcFn::new(&b.𝜓)} }
-//impl<const N:u32> std::ops::Mul<&Tω𝜓<N>> for Op<'_> { type Output=Tω𝜓<N>; fn mul(self, b: &Tω𝜓<N>) -> Self::Output { mul(self, b) } }
-//impl<const N:u32> std::ops::Mul<&mut Tω𝜓<N>> for Op<'_> { type Output=Tω𝜓<N>; fn mul(self, b: &mut Tω𝜓<N>) -> Self::Output { mul(self, b) } }
-
-#[allow(non_camel_case_types)] struct φA<const M:Mesh> { φ: Field<f32,M>, A: Tω𝜓<M> }
-impl<const M:Mesh> Zero for φA<M> { fn zero() -> Self {Self{φ:Field::<f32,M>::zero(), A:Zero::zero()}} } // fixme: #[derive(Zero)]
 struct State<const M:Mesh> {
-    φA : [φA<M>; 2], // [previous,current] {stream function, non-linear advection term}
-    C : Tω𝜓<M>,
+    φ: [Field<f32,M>; 2],
+    T : Quantity<f32,M>,
+    ω : Quantity<f32,M>,
+    C : Quantity<vec2,M>
 }
-impl<const M:Mesh> Zero for State<M> { fn zero() -> Self {Self{φA:Zero::zero(), C:Zero::zero()}} } // fixme: #[derive(Zero)]
-impl<const M:Mesh> State<M> {
-    fn new() -> Self { Self{C:Tω𝜓{ 𝜓:algebra::collect(field::<_,_,M>( |p:uint2|->vec2 { p.as_f32() / (M-1.into()).as_f32() })), ..Zero::zero() }, ..Zero::zero()} }
-    fn update(&mut self, system : &System<M>, _δt : f32) {
-        let _A = system.T.B*self.C.T;
-        //let _A = system.T.B(self.C.T);
-        //framework::core::log( A );
+impl<const M:Mesh> State<M> where System<M>:Operators<M> {
+    fn C0(p:uint2) -> vec2 { p.as_f32() / (M - 1.into()).as_f32() }
+    fn new() -> Self { Self{φ:Zero::zero(), T:Quantity::new(|_|0.), ω:Quantity::new(|_|0.), C:Quantity::new(Self::C0) } }
+    fn C_BC(i:Idx) -> vec2 { let p = mesh::mesh::<M>(i); mask(System::border(p), Self::C0(p)) }
+    fn update(&mut self, system : &System<M>, δt : f32) where Quantity<f32,M>:Operators<M>, Quantity<vec2,M>:Operators<M> {
         // Solves implicit evolution
-        /*let &System{D, T, ω, ωT, ωφ, φ, 𝜓, 𝜓_G} = &system;
-        let &mut Self{C, φA:[φA{φ:φp, A:Ap}, φA{φ:φc, A:Ac}]} = &mut self;
-        use std::ops::Mul; let B : operator::BoxFn<(u32,),f32> = 3f32.mul(Ac.T);
-        let B = 3f32*Ac.T;
-        //let B : operator::BoxFn<'_,(u32,),f32> = 3f32*Ac.T;
-        //let test = A + B;
-        let test = T.B*C.T + 3f32*Ac.T;
-        let Tn = T.A.solve(T.B*C.T  + (3.*δt/2.)*Ac.T - (δt/2.)*Ap.T);
-        *C=Tω𝜓{ ω: ω.A.solve(ω.B*C.ω + (3.*δt/2.)*Ac.ω - (δt/2.)*Ap.ω + ωT(C.T+&Tn) + ωφ*(2.*φc-φp)),
-                        𝜓: 𝜓.A.solve(𝜓.B*C.𝜓 + (3.*δt/2.)*Ap.𝜓  - (δt/2.)*Ap.𝜓  + 𝜓_G), T: Tn};
+        let Self{φ, T, ω, C} = self;
+        let T0 : Field<f32,M> = T.S.clone(); // 2T½ = T0 + T1
+        T.step(&system.T, δt, &|_|0.);
+        // Ra·Pr·∂x/2·2T
+        ω.step(&system.ω, δt, &(system.ωT*(System::operator(System::Dx))(&|i|T0[i]+T.S[i]) + System::operator(System::BC::<Thom,Thom>)(&|i|2.*φ[1][i]-φ[0][i])));
+        C.step(&system.C, δt, &Self::C_BC);
         // Evaluates explicit advection
-        swap(φp, φc); *φc=φ.A.solve(φ.B*C.ω);
-        let U = xy{x:D.y, y:-D.x}*φc; //cross(D)*φc; // need cross = complicated
-        swap(Ap, Ac); *Ac = (U.x*D.x + U.y*D.y)*C; // dot(U,  D)*C; // need dot by ref (+lifetime) = complicated*/
-    }
+        φ.swap(0, 1); φ[1]=system.φ.A.solve(((system.φ.B)())(&ω.S));
+        let U = &xy{x:algebra::collect(System::operator(System::Dy)(&φ[1])), y: algebra::collect(-System::operator(System::Dx)(&φ[1]))}; // cross(D)*(φ,φ)
+        T.advect(U); ω.advect(U); C.advect(U);
+   }
 }
 
 struct Parameters {Pr : f32, Ra : f32}
@@ -139,12 +106,11 @@ fn parameters() -> Parameters {
     }
 }
 
-fn main() {
+fn main() { //where System<M>:Operators<M> {
     const M : Mesh = Mesh{x:128, y:128};
-    let Parameters{Pr,Ra} = parameters();
-    let δt : f32 = 1./(max(M.x,M.y) as f32*sqrt(Ra)); //R·√Ra 1: Temporal resolution
-    //let system = System::<{M}>::new(δt, Pr, Ra);
-    let system = System::<{(M.x,M.y)}>::new(δt, Pr, Ra);
+    let Parameters{Pr:_,Ra} = parameters();
+    let _δt : f32 = 1./(max(M.x,M.y) as f32*sqrt(Ra)); //R·√Ra 1: Temporal resolution
+    //let system = System::new(δt, Pr, Ra);
     //let mut state = State::new();
     //state.update(&system, δt);
     /* subplot(position, size, 4, 0, Cw, Mx, My, "Vorticity ω"_);
