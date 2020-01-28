@@ -58,10 +58,10 @@ struct System<const M:Mesh> {
 impl<const M:Mesh> System<M> {
     fn new(δt : f32, Pr : f32, Ra : f32) -> Self {
         Self{δt,
-            T: Equation::new(P::<M>()                 - (δt/2.)*Δ::<M>() + BC!(constant,derivative),move||box(      P::<M>() + (δt/2.)*Δ::<M>()     )),
+            T: Equation::new(P::<M>()                 - (δt/2.)*Δ::<M>() + mesh::Matrix::new(BC!(constant,derivative)),move||box(      P::<M>() + (δt/2.)*Δ::<M>()     )),
             ω: Equation::new(I::<M>()             - (Pr*δt/2.)*Δ::<M>()                                          ,move||box(      P::<M>() + (Pr*δt/2.)*Δ::<M>())), ωT: Ra*Pr/2.,
             φ: Equation::new(I::<M>()-P::<M>()             + Δ::<M>()                                          ,move||box(-1.*P::<M>()                         )),
-            C: Equation::new(P::<M>()            - (Pr*δt/2.)*Δ::<M>() + BC!(constant,constant),move||box(      P::<M>() + (Pr*δt/2.)*Δ::<M>())),
+            C: Equation::new(P::<M>()            - (Pr*δt/2.)*Δ::<M>() + mesh::Matrix::new(BC!(constant,constant)),move||box(      P::<M>() + (Pr*δt/2.)*Δ::<M>())),
         }
     }
 }

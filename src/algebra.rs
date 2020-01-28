@@ -37,7 +37,7 @@ pub trait Sum : std::iter::Sum<<f32 as Mul<Self>>::Output>+Zero+std::ops::AddAss
 impl<T:std::iter::Sum<<f32 as Mul<T>>::Output>+Zero+std::ops::AddAssign<<f32 as std::ops::Mul<T>>::Output>> Sum for T where f32:Mul<T> {}
 impl<T:Sum> Dot<T> for std::ops::Range<Idx> where f32:Mul<T> {
     fn dot<A:Fn(Idx)->f32, B:Fn(Idx)->T+?Sized>(self, a : &A, b : &B) -> T {
-        //self.map(|k| a(k) * b(k)).sum() // rustc ICE: Unimplemented?
+        //self.map(|k| a(k) * b(k)).sum() // ICE `Unimplemented` selecting `Binder...`
         let mut sum = Zero::zero();
         for k in self { sum += a(k) * b(k) }
         sum

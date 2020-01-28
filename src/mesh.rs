@@ -24,28 +24,13 @@ fn box_operator_once<T:algebra::Sum, F:Fn(uint2,int2)->f32+'static, const M:Mesh
 }
 
 pub struct Equation<T=f32,const M:Mesh> {pub A : Box<algebra::LU<{N(M)}>>, pub B : Box<dyn Fn()->BoxOperatorOnce<T,M>>} // Ax = Bx' + ...
-
-impl<T:algebra::Sum,const M:Mesh> Equation<T,M> where f32:std::ops::Mul<T> { //,Output=T> {
-    /*pub fn new<A:Fn(Mesh,uint2,int2)->f32, B:Fn()->Box<dyn Fn(Mesh,uint2,int2)->f32>+'static>(A:A, B:B) -> Self where f32:std::ops::Mul<T,Output=T> {
-        Self{ A: algebra::LU::new(matrix::<_,M>(A)), B: box move ||box_operator_once::<_,_,M>(B()) }
-        //Self{ A: algebra::LU::new(matrix(M,A)), B: box move ||box operator_once::<_,_,M>(B()) }
-    }*/
+impl<T:algebra::Sum,const M:Mesh> Equation<T,M> where f32:std::ops::Mul<T> {
     pub fn new<A:Fn(uint2,int2)->f32, B:Fn()->Box<dyn Fn(uint2,int2)->f32>+'static>(A:A, B:B) -> Self {
         Self{ A: algebra::LU::new(matrix::<_,M>(A)), B: box move ||box_operator_once::<_,_,M>(B()) }
-        //Self{ A: algebra::LU::new(matrix(M,A)), B: box move ||box operator_once::<_,_,M>(B()) }
     }
 }
 
 use framework::{core::{mask,sign,abs,sq}, vector::xy};
-/*fn const_operator<T:std::iter::Sum,const f:fn(uint2,int2)->f32>(v:&dyn algebra::Vector<T,{M(N)}>) -> algebra::BoxVector<T,M> where f32:std::ops::Mul<T,Output=T> {
-    algebra::BoxVector::new(algebra::matrix_mul::<_,_,_,{N(M)}>(matrix::<_,M>(&f),v))
-}*/
-/*fn operator_once<T:std::iter::Sum,F:Fn(uint2,int2)->f32+'static>(f : F) -> OperatorOnce<T,{xy{x:MX,y:MY}}> where f32:std::ops::Mul<T,Output=T> {
-    box move |v| algebra::BoxVector::new(algebra::matrix_mul::<_,_,_,{N(MX,MY)}>(matrix::<_,MX,MY>(f),v))
-}*/
-/*fn eq<T:std::iter::Sum,A:Fn(uint2,int2)->f32, const B:fn(uint2,int2)->f32>(A:A, B:B) -> Equation<T,M> where f32:std::ops::Mul<T,Output=T> {
-    Equation{ A: algebra::LU::new(matrix::<_,M>(A)), B: Self::operator::<B> }
-}*/
 pub fn I<const M:Mesh>() -> Matrix<'static,M> { Matrix::new(|_,d| mask(d==0, 1.)) }
 pub fn border<const M:Mesh>(xy{x,y}:uint2) -> bool { x==0 || x==M.x-1 || y==0 || y==M.y-1 }
 fn interior<const M:Mesh>(p:uint2,predicate:bool,value:f32) -> f32 { mask(predicate && !border::<M>(p), value) }
@@ -69,7 +54,6 @@ pub fn Δ<const M:Mesh>() -> Matrix<'static,M> { Matrix::new(|p,d:int2|{
     else if p.y==0 || p.y==M.y-1 { Y(M.y,p.y,d.y) }
     else { 0. }
 }*/
-
 #[macro_export] macro_rules! BC { ($X:ident, $Y:ident) => (
     {fn BC<const M:Mesh>(p:uint2, d:int2) -> f32 {
         if p.x==0 || p.x==M.x-1 { $X::<{M.x}>(p.x,d.x) } // Horizontal boundary condition kernel (and corners)
@@ -77,4 +61,3 @@ pub fn Δ<const M:Mesh>() -> Matrix<'static,M> { Matrix::new(|p,d:int2|{
         else { 0. }
     } BC::<M> }
 )}
-
