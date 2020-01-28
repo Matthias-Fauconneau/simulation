@@ -5,7 +5,7 @@ mod algebra;
 #[macro_use] mod mesh; use framework::vector::{uint2,int2};
 use framework::{core::Zero, vector::xy}; use algebra::Idx; use mesh::{Mesh,Field,operator,Equation,I,P,Δ,Dx,Dy};
 
-struct Quantity<T=f32,const M:Mesh> { S : Field<T,M>, A : [Field<T,M>; 2] } // 68436 constant expression depends on a generic parameter
+struct Quantity<T=f32,const M:Mesh> { S : Field<T,M>, A : [Field<T,M>; 2] }
 impl<T:Zero, const M:Mesh> Quantity<T,M> { fn new<S0:Fn(uint2)->T>(s0: S0) -> Self { Self{S:algebra::collect(|i|s0(mesh::mesh::<M>(i))), A:Zero::zero() } } }
 fn mul(a:f32, b:f32) -> f32 { a*b }
 impl<T:Copy+std::ops::Add<Output=T>+algebra::Sum+'static, const M:Mesh> Quantity<T,M> where f32:std::ops::Mul<T,Output=T>{
@@ -38,14 +38,6 @@ mod BoundaryCondition {
 use BoundaryCondition::*;
 
 use framework::vector::vec2;
-/*macro_rules! M { () => ( xy{x:MX,y:MY} ) }
-struct System<const MX:u32, const MY:u32> {
-    T : Equation<f32,{M!()}>, // Temperature
-    ω : Equation<f32,{M!()}>, // Vorticity
-        ωT : f32, // Boussinesq approximation in buoyancy-driven flows
-    φ : Equation<f32,{M!()}>, // Stream function (u=∇×φ)
-    C : Equation<vec2,{M!()}>, // Color (visualization)
-}*/
 struct System<const M:Mesh> {
     δt : f32,
     T : Equation<f32,M>, // Temperature
