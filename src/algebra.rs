@@ -1,7 +1,7 @@
 pub type Len = usize;
 pub type Idx = usize;
 use framework::core::Zero;
-#[derive(Clone)] pub struct Array<T=f32, const N:Len>([T; N]);
+#[derive(Clone)] pub struct Array<T=f32, const N:Len>(pub [T; N]);
 impl<T,const N:Len> std::ops::Deref for Array<T,N> { type Target = [T; N]; fn deref(&self) -> &Self::Target { &self.0 } }
 impl<T,const N:Len> std::ops::DerefMut for Array<T,N> { fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 } }
 impl<T,const N:Len> std::ops::Index<Idx> for Array<T,N> { type Output=T; fn index(&self, i:Idx) -> &Self::Output { &self.0[i] } }
@@ -31,7 +31,7 @@ pub type BoxOperator<'a, T=f32, const N:Len> = crate::compose::BoxFn<'a, (&'a dy
 // vector · operator
 impl<'a, T, const N:Len> Mul<&'a dyn Operator<T,N>> for &'a Array<f32,N> where f32:Mul<T,Output=T> {
     type Output = BoxOperator<'a,T,N>;
-    fn mul(self, B:&'a dyn Operator<T,N>) -> Self::Output { BoxOperator::new(move |v| { let b=B(v); BoxVector::new(move |i| self[i] * b(i)) }) }
+    fn mul(self, b:&'a dyn Operator<T,N>) -> Self::Output { BoxOperator::new(move |v| { let b=b(v); BoxVector::new(move |i| self[i] * b(i)) }) }
 }
 
 pub trait Dot<T> { fn dot<A:Fn(Idx)->f32, B:Fn(Idx)->T+?Sized>(self, a : &A, b : &B) -> T; }
@@ -105,6 +105,7 @@ impl<T:Copy+Zero,const N:Len> Fn<(Idx,Idx)> for CSC<T,N> { extern "rust-call" fn
 
 pub type LU<const N:Len> = CSC<f32,N>;
 impl<const N:Len> LU<N> {
+    #[allow(non_snake_case)]
     pub fn new<M:Matrix<N>>(A : M) -> Box<Self> {
         let mut LU : Box<Self> = unsafe { Box::new_zeroed().assume_init() };
         for i in 0..N {

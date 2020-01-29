@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use framework::vector::{int2,uint2,size2}; use crate::algebra::{self,Idx};
 pub type Mesh = size2;
 pub const fn N(M:Mesh) -> algebra::Len { (M.x*M.y) as algebra::Len }
@@ -7,14 +8,6 @@ pub fn mesh<const M:Mesh>(i:Idx) -> uint2 { div_remu(i as u32,M.x).into() }
 pub fn dmesh<const M:Mesh>(i:Idx,j:Idx) -> int2 { div_rem(j as i32 - i as i32, M.x).into() }
 
 pub type Field<T=f32,const M:Mesh> = algebra::Array<T,{N(M)}>;
-
-/*pub struct Field<T=f32,const M:Mesh>(algebra::Array<T,{N(M)}>);
-impl<T,const M:Mesh> std::ops::Deref for Field<T,M> { type Target = algebra::Array<T,{N(M)}>; fn deref(&self) -> &Self::Target { &self.0 } }
-impl<T,const M:Mesh> std::ops::DerefMut for Field<T,M> { fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 } }
-pub fn collect<T, F:Fn(Idx)->T, const M:Mesh>(f : F) ->Field<T,M> { Field(algebra::collect(f)) }
-impl<T:Zero, const M:Mesh> Zero for Field<T,M> { fn zero() -> Self { Field(Zero::zero()) } }
-impl<T,const M:Mesh> std::ops::Index<uint2> for Field<T,M> { type Output=T; fn index(&self, xy{x,y}:uint2) -> &Self::Output { self[y*M.x+x] } }*/
-pub fn index<const M:Mesh>(xy{x,y}:uint2) -> Idx { (y*M.x+x) as usize }
 
 pub type Matrix<'a, const M:Mesh> = crate::compose::BoxFn<'a,(uint2,int2),f32>;
 fn matrix<F:Fn(uint2,int2)->f32, const M:Mesh>(f : F) -> impl Fn(Idx,Idx)->f32 { move |i,j| { f(mesh::<M>(i), dmesh::<M>(i,j)) } }

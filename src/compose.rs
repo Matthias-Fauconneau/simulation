@@ -8,7 +8,7 @@ impl<Args,Output> Fn<Args> for BoxFn<'_,Args,Output> { extern "rust-call" fn cal
 impl<'a,Args,Output> BoxFn<'a,Args,Output> { pub fn new<F:Fn<Args,Output=Output>+'a>(f:F) -> Self { Self(Box::new(f)) } } // type alias hides constructor
 
 macro_rules! unary { ([$($Op:ident $op:ident),+]) => ($(
-    pub struct $Op<'a,Args,A>(pub super::BoxFn<'a,Args,A>);
+    pub struct $Op<'a,Args,A>(pub BoxFn<'a,Args,A>);
     impl<Args,A> FnOnce<Args> for $Op<'_,Args,A> where A:std::ops::$Op {
         type Output = <A as std::ops::$Op>::Output;
         extern "rust-call" fn call_once(self, args:Args) -> Self::Output { Self::call(&self, args) }
