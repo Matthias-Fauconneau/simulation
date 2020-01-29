@@ -7,6 +7,9 @@ impl<T,const N:Len> std::ops::DerefMut for Array<T,N> { fn deref_mut(&mut self) 
 impl<T,const N:Len> std::ops::Index<Idx> for Array<T,N> { type Output=T; fn index(&self, i:Idx) -> &Self::Output { &self.0[i] } }
 impl<T,const N:Len> std::ops::IndexMut<Idx> for Array<T,N> { fn index_mut(&mut self, i:Idx) -> &mut Self::Output { &mut self.0[i] } }
 pub fn collect<T, F:Fn(Idx)->T, const N:Len>(f : F) -> Array<T, N> { Array(framework::core::array::collect(f)) }
+/*impl<'a,T:'a,const N:Len> FnOnce<(Idx,)> for &'a Array<T,N> { type Output=&'a T;  extern "rust-call" fn call_once(self, args: (Idx,)) -> Self::Output { self.call(args) } }
+impl<'a,T:'a,const N:Len> FnMut<(Idx,)> for &'a Array<T,N> { extern "rust-call" fn call_mut(&mut self, args: (Idx,)) -> Self::Output { self.call(args) } }
+impl<'a,T:'a,const N:Len> Fn<(Idx,)> for &'a Array<T,N> { extern "rust-call" fn call(&self, args: (Idx,)) -> Self::Output { self[args.0] } }*/
 impl<T:Copy,const N:Len> FnOnce<(Idx,)> for Array<T,N> { type Output=T;  extern "rust-call" fn call_once(self, args: (Idx,)) -> Self::Output { self.call(args) } }
 impl<T:Copy,const N:Len> FnMut<(Idx,)> for Array<T,N> { extern "rust-call" fn call_mut(&mut self, args: (Idx,)) -> Self::Output { self.call(args) } }
 impl<T:Copy,const N:Len> Fn<(Idx,)> for Array<T,N> { extern "rust-call" fn call(&self, args: (Idx,)) -> Self::Output { self[args.0] } }

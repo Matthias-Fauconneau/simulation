@@ -3,23 +3,24 @@
 mod compose; use compose::BoxFn;
 mod algebra;
 #[macro_use] mod mesh; use framework::vector::{uint2,int2};
-use framework::{core::Zero, vector::xy}; use algebra::Idx; use mesh::{Mesh,Field,operator,Equation,I,P,Δ,Dx,Dy};
+use framework::{core::Zero, vector::xy}; use algebra::{Idx,collect}; use mesh::{Mesh,Field,index,operator,Equation,I,P,Δ,Dx,Dy};
 
 struct Quantity<T=f32,const M:Mesh> { S : Field<T,M>, A : [Field<T,M>; 2] }
-impl<T:Zero, const M:Mesh> Quantity<T,M> { fn new<S0:Fn(uint2)->T>(s0: S0) -> Self { Self{S:algebra::collect(|i|s0(mesh::mesh::<M>(i))), A:Zero::zero() } } }
+impl<T:Zero, const M:Mesh> Quantity<T,M> { fn new<S0:Fn(uint2)->T>(s0: S0) -> Self { Self{S:collect(|i|s0(mesh::mesh::<M>(i))), A:Zero::zero() } } }
 fn mul(a:f32, b:f32) -> f32 { a*b }
 impl<T:Copy+std::ops::Add<Output=T>+algebra::Sum+'static, const M:Mesh> Quantity<T,M> where f32:std::ops::Mul<T,Output=T>{
     fn step<G:Fn(Idx)->T>(&mut self, E:&Equation<T,M>, δt:f32, g:&G) where T:std::ops::Sub<Output=T> {
         // 2-step Adams-Bashforth:  y[2] = y[1] + 3/2·δt·A(t[1],y[1]) - 1/2·δt·A(t[0],y[0])
         let b : Field<T,M> = {
             let BS = ((E.B)())(&self.S);
-            algebra::collect(|i| BS(i) + (mul(3.,δt)/2.)*self.A[1][i] - (δt/2.)*self.A[0][i] + g(i))
+            //collect(|i| BS(i) + (3.*δt/2.)*self.A[1][i] - (δt/2.)*self.A[0][i] + g(i))
+            collect(|i| BS(i) + (mul(3.,δt)/2.)*self.A[1][i] - (δt/2.)*self.A[0][i] + g(i))
         };
         self.S = E.A.solve(b)
     }
     fn advect(&mut self, U:&xy<Field<f32,M>>) {
         self.A.swap(0, 1);
-        self.A[1] = algebra::collect((&U.x*&operator::<_,_,M>(Dx::<M>) + &U.y*&operator::<_,_,M>(Dy::<M>))(&self.S));
+        self.A[1] = collect((&U.x*&operator::<_,_,M>(Dx::<M>) + &U.y*&operator::<_,_,M>(Dy::<M>))(&self.S));
     }
 }
 
@@ -49,11 +50,12 @@ struct System<const M:Mesh> {
 
 impl<const M:Mesh> System<M> {
     fn new(δt : f32, Pr : f32, Ra : f32) -> Self {
+        macro_rules! M { ($($M:ident)+) => ($( macro_rules! $M { () => ( $M::<M>() ) } )+) } M!(P); //macro_rules! P { () => ( P::<M>() ) }
         Self{δt,
-            T: Equation::new(P::<M>()                 - (δt/2.)*Δ::<M>() + mesh::Matrix::new(BC!(constant,derivative)),move||box(      P::<M>() + (δt/2.)*Δ::<M>()     )),
-            ω: Equation::new(I::<M>()             - (Pr*δt/2.)*Δ::<M>()                                          ,move||box(      P::<M>() + (Pr*δt/2.)*Δ::<M>())), ωT: Ra*Pr/2.,
-            φ: Equation::new(I::<M>()-P::<M>()             + Δ::<M>()                                          ,move||box(-1.*P::<M>()                         )),
-            C: Equation::new(P::<M>()            - (Pr*δt/2.)*Δ::<M>() + mesh::Matrix::new(BC!(constant,constant)),move||box(      P::<M>() + (Pr*δt/2.)*Δ::<M>())),
+            T: Equation::new(P!()                 - (δt/2.)*Δ::<M>() + mesh::Matrix::new(BC!(constant,derivative)),move||box(      P!() + (δt/2.)*Δ::<M>()     )),
+            ω: Equation::new(I::<M>()             - (Pr*δt/2.)*Δ::<M>()                                          ,move||box(      P!() + (Pr*δt/2.)*Δ::<M>())), ωT: Ra*Pr/2.,
+            φ: Equation::new(I::<M>()-P!()             + Δ::<M>()                                          ,move||box(-1.*P!()                         )),
+            C: Equation::new(P!()            - (Pr*δt/2.)*Δ::<M>() + mesh::Matrix::new(BC!(constant,constant)),move||box(      P!() + (Pr*δt/2.)*Δ::<M>())),
         }
     }
 }
@@ -78,7 +80,7 @@ impl<const M:Mesh> State<M> {
         C.step(&system.C, system.δt, &Self::C_BC);
         // Evaluates explicit advection
         φ.swap(0, 1); φ[1]=system.φ.A.solve(((system.φ.B)())(&ω.S));
-        let U = &xy{x:algebra::collect(operator::<_,_,M>(Dy::<M>)(&φ[1])), y: algebra::collect(-operator::<_,_,M>(Dx::<M>)(&φ[1]))};
+        let U = &xy{x:collect(operator::<_,_,M>(Dy::<M>)(&φ[1])), y: collect(-operator::<_,_,M>(Dx::<M>)(&φ[1]))};
         T.advect(U); ω.advect(U); C.advect(U);
    }
 }
@@ -110,15 +112,35 @@ impl<const M:Mesh> Simulation<M> {
     fn update(&mut self) { self.state.update(&self.system); }
 }
 
-//type GridSimulation<const MX:u32, const MY:u32> = Simulation<{xy{x:MX,y:MY}}>;  // expected `ByRef ..., found ByRef ...`
-struct GridSimulation<const MX:u32, const MY:u32>(Simulation<{xy{x:MX,y:MY}}>);
-impl<const MX:u32, const MY:u32> GridSimulation<MX,MY> { fn new(δt : f32, Pr : f32, Ra : f32) -> Self { Self(Simulation::new(δt, Pr, Ra)) } }
+use framework::{core::abs, vector::size2, image::{IntoPixelIterator, bgra8}, window::{Widget,Target}};
+impl<const M:Mesh> Widget for Simulation<M> {
+    fn size(&mut self, size : size2) -> size2 { size }
+    fn render(&mut self, target : &mut Target) -> Result {
+        for (p, pixel) in target.pixels() {
+            let c = self.state.T.S[index::<M>(p*(M-1.into())/(target.size-1.into()))];
+             //assert!(c >= 0. && c<= 1., c);
+            let a = framework::image::sRGB::sRGB(f32::min(abs(c),1.));
+            *pixel = if c>0. { bgra8{b : 0, g : a, r : a, a : 0xFF} } else { bgra8{b : a, g : a, r : 0, a : 0xFF} };
+        }
+        self.update();
+        Ok(())
+    }
+}
 
-fn main() {
+use framework::{core::Result, window::run};
+fn main() -> Result {
     const M:Mesh = xy{x:2,y:2};
     let Parameters{Pr,Ra} = parameters();
     use framework::core::sqrt;
     let δt : f32 = 1./(std::cmp::max(M.x,M.y) as f32*sqrt(Ra)); //R·√Ra 1: Temporal resolution
-    let mut simulation = GridSimulation::<{M.x},{M.y}>::new(δt, Pr, Ra);
-    simulation.0.update();
+    //run(Simulation::<M>::new(δt, Pr, Ra)) // expected `ByRef ..., found ByRef ...`
+    struct GridSimulation<const MX:u32, const MY:u32>(Simulation<{xy{x:MX,y:MY}}>);
+    /*impl<const MX:u32, const MY:u32> std::ops::Deref for GridSimulation<MX,MY> { type Target = Simulation<{xy{x:MX,y:MY}}>;
+        fn deref(&self) -> &Self::Target { &self.0 } }
+    impl<const MX:u32, const MY:u32> std::ops::DerefMut for GridSimulation<MX,MY> { fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 } }*/
+    impl<const MX:u32, const MY:u32> Widget for GridSimulation<MX,MY> {
+        fn size(&mut self, size:size2) -> size2 { self.0.size(size) }
+        fn render(&mut self, target:&mut Target) -> Result { self.0.render(target) }
+    }
+    run(GridSimulation::<{M.x},{M.y}>(Simulation::new(δt, Pr, Ra)))
 }
