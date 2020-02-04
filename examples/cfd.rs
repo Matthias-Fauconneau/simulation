@@ -1,19 +1,19 @@
 #![allow(incomplete_features,non_snake_case)]#![feature(const_generics,non_ascii_idents,box_syntax)]use simulation::*;
 
 struct Quantity<T=f32,const M:Mesh> { u : Field<T,M>, f : [Field<T,M>; 2] }
-impl<T:Zero, const M:Mesh> Quantity<T,M> { fn new<U0:Fn(uint2)->T>(u0: U0) -> Self { Self{u:mesh::collect(u0), f:Zero::zero() } } }
-impl<T:Copy+Add+Sum, const M:Mesh> Quantity<T,M> where f32:Mul<T> {
+impl<T:Zero, const M:Mesh> Quantity<T,M> { fn new<U0:Fn(uint2)->T>(u0: U0) -> Self { Self{u:mesh::map(u0), f:Zero::zero() } } }
+impl<T:Copy+Add+Sum, const M:Mesh> Quantity<T,M> where f32:Mul<T>, LU:Solve<T> {
     fn step<G:Fn(Idx)->T>(&mut self, equation:&Equation<T,M>, δt:f32, g:&G) where T:Sub {
         // 2-step Adams-Bashforth:  y[2] = y[1] + 3/2·δt·f(t[1],y[1]) - 1/2·δt·f(t[0],y[0])
         let b : Field<T,M> = {
             fn mul(a:f32, b:f32) -> f32 { a*b }
-            collect(|i| ((equation.B)())(&self.u)(i) + (mul(3.,δt)/2.)*self.f[1][i] - (δt/2.)*self.f[0][i] + g(i))
+            map(|i| ((equation.B)())(&self.u)(i) + (mul(3.,δt)/2.)*self.f[1][i] - (δt/2.)*self.f[0][i] + g(i))
         };
         self.u = equation.A.solve(b)
     }
     fn advect(&mut self, v : &xy<Field<f32,M>>) {
         self.f.swap(0, 1);
-        self.f[1] = collect((&v.x*&Dx!() + &v.y*&Dy!())(&self.u));
+        self.f[1] = map((&v.x*&Dx!() + &v.y*&Dy!())(&self.u));
     }
 }
 
@@ -22,11 +22,7 @@ mod boundary_condition {
     use super::*;
     pub fn constant<const M:u32>(p:u32, d:i32) -> f32 { assert!(p==0||p==M-1); mask(d==0, 1.) }
     fn kernel<const C:[f32;3], const SYM:f32>(m:u32,p:u32,d:i32) -> f32 {
-        if (-(C.len() as i32)+1..C.len() as i32).contains(&d) {
-            if p==0 { C[d as usize] }
-            else if p==m-1 { SYM*C[(m-1-abs(d) as u32) as usize] }
-            else { panic!(); }
-        } else { 0. }
+        if (-(C.len() as i32)+1..C.len() as i32).contains(&d) { (if p==m-1 { SYM } else { 1. })*C[abs(d) as usize] } else { 0. }
     }
     pub fn derivative<const M:u32>(p:u32, d:i32) -> f32 { kernel::<{[-3.,4.,-1f32]},-1f32>(M,p,d)/2. } // Boundary condition on derivative
     pub fn Thom<const M:u32>(p:u32, d:i32) -> f32 { kernel::<{[0.,-8.,1f32]},1f32>(M,p,d) } // Thom boundary condition
@@ -38,9 +34,8 @@ struct System<const M:Mesh> {
     ω : Equation<f32,M>, // Vorticity
         ωT : f32, // Boussinesq approximation in buoyancy-driven flows
     φ : Equation<f32,M>, // Stream function (u=∇×φ)
-    C : Equation<vec2,M>, // Color (visualization)
+    C : Equation<v2<f32>,M>, // Color (visualization)
 }
-
 impl<const M:Mesh> System<M> {
     fn new(δt : f32, Pr : f32, Ra : f32) -> Self {
         Self{δt,
@@ -56,13 +51,13 @@ struct State<const M:Mesh> {
     φ: [Field<f32,M>; 2],
     T : Quantity<f32,M>,
     ω : Quantity<f32,M>,
-    C : Quantity<vec2,M>
+    C : Quantity<v2<f32>,M>
 }
 
 impl<const M:Mesh> State<M> {
-    fn C0(p:uint2) -> vec2 { p.as_f32() / (M - 1.into()).as_f32() }
+    fn C0(p:uint2) -> v2<f32> { let v = p.as_f32() / (M - 1.into()).as_f32(); v2(v.x, v.y) }
     fn new() -> Self { Self{φ:Zero::zero(), T:Quantity::new(|_|0.), ω:Quantity::new(|_|0.), C:Quantity::new(Self::C0) } }
-    fn C_BC(i:Idx) -> vec2 { let p = mesh::<M>(i); mask(border::<M>(p), Self::C0(p)) }
+    fn C_BC(i:Idx) -> v2<f32> { let p = mesh::<M>(i); mask(border::<M>(p), Self::C0(p)) }
     fn step(&mut self, system : &System<M>) {
         // Solves implicit evolution
         let Self{φ, T, ω, C} = self;
@@ -72,7 +67,7 @@ impl<const M:Mesh> State<M> {
         C.step(&system.C, system.δt, &Self::C_BC);
         // Evaluates explicit advection
         φ.swap(0, 1); φ[1]=system.φ.A.solve(((system.φ.B)())(&ω.u));
-        let v = &xy{x:collect(Dy!()(&φ[1])), y: collect(-Dx!()(&φ[1]))};
+        let v = &xy{x:map(Dy!()(&φ[1])), y: map(-Dx!()(&φ[1]))};
         T.advect(v); ω.advect(v); C.advect(v);
    }
 }
@@ -84,13 +79,12 @@ struct Simulation<const M:Mesh> {
 impl<const M:Mesh> Simulation<M> { fn new(δt : f32, Pr : f32, Ra : f32) -> Self { Self{system: System::new(δt, Pr, Ra), state: State::new()} } }
 
 impl<const M:Mesh> Solution for Simulation<M> {
-    fn current(&self) -> view::Field { view::Field{size: M, data: &self.state.T.u.0} }
+    fn current(&self) -> view::Field { view::Field{size: M, values: &self.state.T.u.0} }
     fn step(&mut self) { self.state.step(&self.system); }
 }
 
 fn main() -> Result {
-    const M:Mesh = xy{x:2,y:2};
-
+    const M:Mesh = xy{x:64,y:64};
     struct Parameters {Pr : f32, Ra : f32}
     fn parameters() -> Parameters {
         use SI::*;
