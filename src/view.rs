@@ -17,7 +17,7 @@ impl<T:Solution> Widget for View<T> {
         let field = self.0.current();
         let min = min(field.values);
         let max = max(field.values);
-        log!(min, max, field.values);
+        log!(min, max);
         let time = std::time::Instant::now();
         let size = target.size;
         target.set(|p| {
@@ -26,9 +26,9 @@ impl<T:Solution> Widget for View<T> {
             let a = framework::image::sRGB::sRGB(f32::min(abs(c),1.));
             if c>0. { bgra8{b : 0, g : a, r : a, a : 0xFF} } else { bgra8{b : a, g : a, r : 0, a : 0xFF} }
         });
-        log!(time.elapsed().as_millis());
-        //self.0.step(); // FIXME: async
-        Ok(())
+        log!(time.elapsed().as_millis()); let time = std::time::Instant::now();
+        self.0.step(); // FIXME: async
+        log!(time.elapsed().as_millis()); panic!(); //Ok(())
     }
 }
 

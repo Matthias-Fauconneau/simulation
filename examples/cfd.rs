@@ -3,46 +3,45 @@
 struct Quantity<T=f32,const M:Mesh> { u : Field<T,M>, f : [Field<T,M>; 2] }
 impl<T:Zero, const M:Mesh> Quantity<T,M> { fn new<U0:Fn(uint2)->T>(u0: U0) -> Self { Self{u:mesh::map(u0), f:Zero::zero() } } }
 impl<T:Copy+Add+Sum, const M:Mesh> Quantity<T,M> where f32:Mul<T>, LU:Solve<T> {
-    fn step<G:Fn(Idx)->T>(&mut self, equation:&Equation<T,M>, δt:f32, g:&G) where T:Sub {
+    fn step<G:Fn(Idx)->T>(&mut self, equation:&Equation<M>, δt:f32, g:&G) where T:Sub {
         // 2-step Adams-Bashforth:  y[2] = y[1] + 3/2·δt·f(t[1],y[1]) - 1/2·δt·f(t[0],y[0])
-        let b : Field<T,M> = {
-            fn mul(a:f32, b:f32) -> f32 { a*b }
-            map(|i| ((equation.B)())(&self.u)(i) + (mul(3.,δt)/2.)*self.f[1][i] - (δt/2.)*self.f[0][i] + g(i))
-        };
-        self.u = equation.A.solve(b)
+        let time = std::time::Instant::now();
+        fn mul(a:f32, b:f32) -> f32 { a*b }
+        self.u = equation.A.solve(|i| dot(&(equation.B)(i), &self.u) + (mul(3.,δt)/2.)*self.f[1][i] - (δt/2.)*self.f[0][i] + g(i));
+        log!("solve", time.elapsed().as_millis());
     }
     fn advect(&mut self, v : &xy<Field<f32,M>>) {
         self.f.swap(0, 1);
-        self.f[1] = map((&v.x*&Dx!() + &v.y*&Dy!())(&self.u));
-    }
+        self.f[1] = map(|i| v.x[i]*dot(&Dx!()(i), &self.u) + v.y[i]*dot(&Dy!()(i), &self.u));
+     }
 }
 
 use boundary_condition::*;
 mod boundary_condition {
-    use super::*;
-    pub fn constant<const M:u32>(p:u32, d:i32) -> f32 { assert!(p==0||p==M-1); mask(d==0, 1.) }
-    fn kernel<const C:[f32;3], const SYM:f32>(m:u32,p:u32,d:i32) -> f32 {
-        if (-(C.len() as i32)+1..C.len() as i32).contains(&d) { (if p==m-1 { SYM } else { 1. })*C[abs(d) as usize] } else { 0. }
+    use framework::core::{Zero,array::map};
+    pub fn constant(_:u32) -> [(i32, f32); 3] { [(0, 1.),Zero::zero(),Zero::zero()] }
+    fn kernel<const K:[f32;3], const C:[f32;2]>(p:u32) -> [(i32, f32); 3] {
+        if p==0 { map(|i| (i as i32, C[0]*K[i])) } else { map(|i| (-(i as i32), C[1]*K[i])) }
     }
-    pub fn derivative<const M:u32>(p:u32, d:i32) -> f32 { kernel::<{[-3.,4.,-1f32]},-1f32>(M,p,d)/2. } // Boundary condition on derivative
-    pub fn Thom<const M:u32>(p:u32, d:i32) -> f32 { kernel::<{[0.,-8.,1f32]},1f32>(M,p,d) } // Thom boundary condition
+    pub fn derivative(p:u32) -> [(i32, f32); 3] { kernel::<{[-3.,4.,-1f32]},{[1./2.,-1./2.]}>(p) } // Boundary condition on derivative
+    pub fn Thom(p:u32) -> [(i32, f32); 3] { kernel::<{[0.,-8.,1f32]},{[1.,1.]}>(p) } // Thom boundary condition
 }
 
 struct System<const M:Mesh> {
     δt : f32,
-    T : Equation<f32,M>, // Temperature
-    ω : Equation<f32,M>, // Vorticity
+    T : Equation<M>, // Temperature
+    ω : Equation<M>, // Vorticity
         ωT : f32, // Boussinesq approximation in buoyancy-driven flows
-    φ : Equation<f32,M>, // Stream function (u=∇×φ)
-    C : Equation<v2<f32>,M>, // Color (visualization)
+    φ : Equation<M>, // Stream function (u=∇×φ)
+    C : Equation<M>, // Color (visualization)
 }
 impl<const M:Mesh> System<M> {
     fn new(δt : f32, Pr : f32, Ra : f32) -> Self {
         Self{δt,
-            T: Equation::new(P!() - (    δt/2.)*Δ!() + Matrix::new(BC!(constant,derivative)),move||box(      P!() + (     δt/2.)*Δ!()     )),
-            ω: Equation::new(I!() - (Pr*δt/2.)*Δ!()                                                               ,move||box(      P!() + (Pr*δt/2.)*Δ!())), ωT: Ra*Pr/2.,
-            φ: Equation::new(I!()-P!()          + Δ!()                                                              ,move||box(-1.*P!()                         )),
-            C: Equation::new(P!() - (Pr*δt/2.)*Δ!() + Matrix::new(BC!(constant,constant)),move||box(      P!() + (Pr*δt/2.)*Δ!())),
+            T: Equation::new(P!() - (    δt/2.)*Δ!() + BC!(constant,derivative),     P!() + (     δt/2.)*Δ!()),
+            ω: Equation::new(I!() - (Pr*δt/2.)*Δ!()                                          ,     P!() + (Pr*δt/2.)*Δ!()), ωT: Ra*Pr/2.,
+            φ: Equation::new(I!()-P!()          + Δ!()                                         ,-1.*P!() + (         0.)*Δ!()),
+            C: Equation::new(P!() - (Pr*δt/2.)*Δ!() + BC!(constant,constant),     P!() + (Pr*δt/2.)*Δ!()),
         }
     }
 }
@@ -61,14 +60,28 @@ impl<const M:Mesh> State<M> {
     fn step(&mut self, system : &System<M>) {
         // Solves implicit evolution
         let Self{φ, T, ω, C} = self;
-        let T0 : Field<f32,M> = T.u.clone(); // 2T½ = T0 + T1
+        let mut T0 : Field<f32,M> = T.u.clone();
+        let time = std::time::Instant::now();
         T.step(&system.T, system.δt, &|_|0.);
-        ω.step(&system.ω, system.δt, &(system.ωT*Dx!()(&|i|T0[i]+T.u[i]) + operator_BC!(Thom,Thom)(&|i|2.*φ[1][i]-φ[0][i])));
+        log!("T", time.elapsed().as_millis()); let time = std::time::Instant::now();
+        for i in 0..mesh::N(M) { T0[i] = system.ωT*(T0[i]+T.u[i]); } let T12=T0;
+        let mut φp : Field<f32,M> = Zero::zero(); // fixme: may be uninitialized
+        for i in 0..mesh::N(M) { φp[i] = 2.*φ[1][i]-φ[0][i]; }
+        ω.step(&system.ω, system.δt, &|i| dot(&Dx!()(i),&T12) + dot(&rows_BC!(Thom,Thom)(i), &φp));
+        log!("w", time.elapsed().as_millis()); let time = std::time::Instant::now();
         C.step(&system.C, system.δt, &Self::C_BC);
+        log!("C", time.elapsed().as_millis()); let time = std::time::Instant::now();
         // Evaluates explicit advection
-        φ.swap(0, 1); φ[1]=system.φ.A.solve(((system.φ.B)())(&ω.u));
-        let v = &xy{x:map(Dy!()(&φ[1])), y: map(-Dx!()(&φ[1]))};
-        T.advect(v); ω.advect(v); C.advect(v);
+        φ.swap(0, 1); φ[1]=system.φ.A.solve(|i|dot(&(system.φ.B)(i),&ω.u));
+        log!("φ", time.elapsed().as_millis()); let time = std::time::Instant::now();
+        let v = &xy{x:map(|i|dot(&Dy!()(i),&φ[1])), y: map(|i|-dot(&Dx!()(i),&φ[1]))};
+        log!("v", time.elapsed().as_millis()); let time = std::time::Instant::now();
+        T.advect(v);
+        log!("T advect", time.elapsed().as_millis()); let time = std::time::Instant::now();
+        ω.advect(v);
+        log!("w advect", time.elapsed().as_millis()); let time = std::time::Instant::now();
+        C.advect(v);
+        log!("explicit C", time.elapsed().as_millis());
    }
 }
 
@@ -84,7 +97,7 @@ impl<const M:Mesh> Solution for Simulation<M> {
 }
 
 fn main() -> Result {
-    const M:Mesh = xy{x:64,y:64};
+    const M:Mesh = xy{x:128,y:128};
     struct Parameters {Pr : f32, Ra : f32}
     fn parameters() -> Parameters {
         use SI::*;

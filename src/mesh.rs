@@ -1,65 +1,79 @@
 #![allow(non_snake_case)]
-use framework::vector::{int2,uint2,size2}; use crate::algebra::{self,Idx};
+use {framework::{core::{Zero,array::Iterator},vector::{int2,uint2,size2}},crate::algebra::{self,Idx,Array}};
 pub type Mesh = size2;
 pub const fn N(M:Mesh) -> algebra::Len { (M.x*M.y) as algebra::Len }
 fn div_remu(n : u32, d : u32) -> (u32, u32) { (n/d, n%d) }
-fn div_rem(n : i32, d : u32) -> (i32, i32) { (n/d as i32, n%d as i32) }
 pub fn mesh<const M:Mesh>(i:Idx) -> uint2 { div_remu(i as u32,M.x).into() }
-pub fn dmesh<const M:Mesh>(i:Idx,j:Idx) -> int2 { div_rem(j as i32 - i as i32, M.x).into() }
+fn dmesh<const M:Mesh>(p: uint2, d: int2) -> u32 { ((p.y as i32+d.y) as u32)*M.x+(p.x as i32+d.x) as u32 }
 
-pub type Field<T=f32,const M:Mesh> = algebra::Array<T,{N(M)}>;
+pub type Field<T=f32,const M:Mesh> = Array<T,{N(M)}>;
 pub fn map<T,F:Fn(uint2)->T,const M:Mesh>(f: F) -> Field<T,M> { algebra::map(|i|f(mesh::<M>(i))) }
 
-pub type Matrix<'a, const M:Mesh> = crate::compose::BoxFn<'a,(uint2,int2),f32>;
-fn matrix<F:Fn(uint2,int2)->f32, const M:Mesh>(f : F) -> impl Fn(Idx,Idx)->f32 { move |i,j| { f(mesh::<M>(i), dmesh::<M>(i,j)) } }
-
-pub type Operator<T,const M:Mesh> = Box<dyn algebra::Operator<T,{N(M)}>>;
-pub fn operator<T:algebra::Sum,F:Fn(uint2,int2)->f32+Clone+'static,const M:Mesh>(f : F) -> Operator<T,M> where f32:std::ops::Mul<T,Output=T> {
-    box move |v| algebra::BoxVector::new(algebra::matrix_mul::<_,_,_,{N(M)}>(matrix::<_,M>(f.clone()),v))
+pub type Row<const K:usize> = Array<(int2,f32), K>;
+impl<const A:usize, const B:usize> std::ops::Add<Row<B>> for Row<A> {
+    type Output=Row<{A+B}>;
+    fn add(self, mut b: Row<B>) -> Self::Output where Self::Output: {
+        let mut m : Self::Output = Zero::zero();
+        let mut a = self;
+        for i in 0..a.len() { m[            i]=a[i]; for j in 0..b.len() { if b[j].0==a[i].0 { m[            i].1+=b[j].1; b[j]=Zero::zero(); } } }
+        for i in 0..b.len() { m[a.len()+i]=b[i]; for j in 0..a.len() { if a[j].0==b[i].0 { m[a.len()+i].1+=a[j].1; a[j]=Zero::zero(); } } }
+        m
+    }
+}
+impl<const A:usize, const B:usize> std::ops::Sub<Row<B>> for Row<A> {
+    type Output=Row<{A+B}>;
+    fn sub(self, mut b: Row<B>) -> Self::Output where Self::Output: {
+        let mut m : Self::Output = Zero::zero();
+        let mut a = self;
+        for i in 0..a.len() { m[            i]=a[i]; for j in 0..b.len() { if b[j].0==a[i].0 { m[            i].1-=b[j].1; b[j]=Zero::zero(); } } }
+        for i in 0..b.len() { m[a.len()+i]=b[i]; for j in 0..a.len() { if a[j].0==b[i].0 { m[a.len()+i].1=a[j].1-m[a.len()+i].1; a[j]=Zero::zero(); } } }
+        m
+    }
+}
+impl<const K:usize> std::ops::Mul<Row<K>> for f32 {
+    type Output=Row<K>;
+    fn mul(self, b: Row<K>) -> Self::Output { Array(Iterator::collect(b.iter().map(|(d,v)|(*d,self**v)))) }
 }
 
-pub type BoxOperatorOnce<T,const M:Mesh> = Box<dyn algebra::OperatorOnce<T,{N(M)}>>;
-fn box_operator_once<T:algebra::Sum, F:Fn(uint2,int2)->f32+'static, const M:Mesh>(f : F) -> BoxOperatorOnce<T,M> where f32:std::ops::Mul<T> { //{,Output=T> {
-    box move |v| algebra::BoxVector::new(algebra::matrix_mul::<_,_,_,{N(M)}>(matrix::<_,M>(f),v))
-}
-
-//pub struct Equation<T=f32,const M:Mesh> {pub A : Box<algebra::LU<{N(M)}>>, pub B : Box<dyn Fn()->BoxOperatorOnce<T,M>>} // Ax = Bx' + ...
-pub struct Equation<T=f32,const M:Mesh> {pub A : algebra::LU, pub B : Box<dyn Fn()->BoxOperatorOnce<T,M>>} // Ax = Bx' + ...
-impl<T:algebra::Sum,const M:Mesh> Equation<T,M> where f32:std::ops::Mul<T> {
-    pub fn new<A:Fn(uint2,int2)->f32, B:Fn()->Box<dyn Fn(uint2,int2)->f32>+'static>(A:A, B:B) -> Self {
-        //Self{ A: algebra::LU::new(matrix::<_,M>(A)), B: box move ||box_operator_once::<_,_,M>(B()) }
-        //Self{ A: algebra::LU::new::<_,{N(M)}>(matrix::<_,M>(A)), B: box move ||box_operator_once::<_,_,M>(B()) }
-        Self{ A: algebra::LU::new(N(M), matrix::<_,M>(A)), B: box move ||box_operator_once::<_,_,M>(B()) }
+pub type Rows<'a, const M:Mesh, const K:usize> = crate::compose::BoxFn<'a,(uint2,),Row<K>>;
+pub fn rows<F:Fn(uint2)->Row<K>, const M:Mesh, const K:usize>(f : F) -> impl /*algebra::Rows<{N(M)},{K}>*/ Fn(Idx)->algebra::Row<K> {
+    move |i| {
+        let p = mesh::<M>(i);
+        //Array(Iterator::collect( f(p).iter().map(|(d,v)| (dmesh::<M>(p,*d), *v)) ))
+        algebra::map({let f=f(p); move |j| (dmesh::<M>(p,f[j].0), f[j].1)})
     }
 }
 
-use framework::{core::{mask,sign,abs,sq}, vector::xy};
-pub fn I<const M:Mesh>(_:uint2, d:int2) -> f32 { mask(d==0, 1.) }
-pub fn border<const M:Mesh>(xy{x,y}:uint2) -> bool { x==0 || x==M.x-1 || y==0 || y==M.y-1 }
-fn interior<const M:Mesh>(p:uint2,predicate:bool,value:f32) -> f32 { mask(predicate && !border::<M>(p), value) }
-pub fn P<const M:Mesh>(p:uint2, d:int2) -> f32 { interior::<M>(p, d==0, 1.) }
-fn δ<const M:Mesh>() -> framework::vector::vec2 { framework::vector::div_f32(1f32, M.as_f32()) }
-pub fn Dx<const M:Mesh>(p:uint2, d:int2) -> f32 { interior::<M>(p, (abs(d.x),d.y) == (1,0), sign(d.x) as f32/(2.*δ::<M>().x)) } // ∂x
-pub fn Dy<const M:Mesh>(p:uint2, d:int2) -> f32 { interior::<M>(p, (d.x,abs(d.y)) == (0,1), sign(d.y) as f32/(2.*δ::<M>().y)) } // ∂y
-pub fn Δ<const M:Mesh>(p:uint2, d:int2) -> f32 {
-    interior::<M>(p, true, {
-    match (abs(d.x),abs(d.y)) {
-            (0,0) => -2.*(1./sq(δ::<M>().x)+1./sq(δ::<M>().y)),
-            (1,0) => 1./sq(δ::<M>().x),
-            (0,1) => 1./sq(δ::<M>().y),
-            _ => 0.
-        }
-    })
+pub struct Equation<const M:Mesh> {pub A : algebra::LU, pub B : Box<dyn algebra::Rows<{N(M)},6>>} // Ax = Bx' + ...
+impl<const M:Mesh> Equation<M> {
+    pub fn new<A:Fn(uint2)->Row<KA>, B:Fn(uint2)->Row<6>+'static, const KA:usize>(A:A, B:B) -> Self {
+        Self{A: algebra::LU::new(N(M), rows::<_,M,KA>(A)), B: box rows::<_,M,6>(B)}
+    }
 }
-macro_rules! matrix_new_Op_M { ($($Op:ident)+) => ($( #[macro_export] macro_rules! $Op { () => ( Matrix::new($Op::<M>) ) } )+) } matrix_new_Op_M!(I P Δ);
-macro_rules! operator_Op { ($($Op:ident)+) => ($( #[macro_export] macro_rules! $Op { () => ( operator::<_,_,M>($Op::<M>) ) } )+) } operator_Op!(Dx Dy);
 
-//pub fn BC<const M:Mesh, const X: BC, const Y: BC>(p:uint2, d:int2) -> f32 {
-#[macro_export] macro_rules! BC { ($X:ident, $Y:ident) => (
-    {fn BC<const M:Mesh>(p:uint2, d:int2) -> f32 {
-        if p.x==0 || p.x==M.x-1 { $X::<{M.x}>(p.x,d.x) } // Horizontal boundary condition kernel (and corners)
-        else if p.y==0 || p.y==M.y-1 { $Y::<{M.y}>(p.y,d.y) }
-        else { 0. }
-    } BC::<M> }
-)}
-#[macro_export] macro_rules! operator_BC { ($X:ident, $Y:ident) => ( operator::<_,_,M>(BC!($X,$Y)) ) }
+use framework::{core::{mask,sq}, vector::xy};
+pub fn I<const M:Mesh>(_:uint2) -> Row<1> { Array([(xy{x:0, y:0}, 1.)]) }
+pub fn border<const M:Mesh>(xy{x,y}:uint2) -> bool { x==0 || x==M.x-1 || y==0 || y==M.y-1 }
+fn interior<const M:Mesh, const K:usize>(p:uint2, kernel: Row<K>) -> Row<K> { mask(!border::<M>(p), kernel) }
+pub fn P<const M:Mesh>(p:uint2) -> Row<1> { interior::<M,1>(p, Array([(xy{x:0, y:0}, 1.)])) }
+fn δ<const M:Mesh>() -> framework::vector::vec2 { framework::vector::div_f32(1f32, M.as_f32()) }
+pub fn Dx<const M:Mesh>(p:uint2) -> Row<2> { let c = 1./(2.*δ::<M>().x); interior::<M,2>(p, Array([(xy{x:-1, y:0}, -c), (xy{x:1, y:0}, c)])) } // ∂x
+pub fn Dy<const M:Mesh>(p:uint2) -> Row<2> { let c = 1./(2.*δ::<M>().y); interior::<M,2>(p, Array([(xy{x:0, y:-1}, -c), (xy{x:0, y:1}, c)])) } // ∂y
+pub fn Δ<const M:Mesh>(p:uint2) -> Row<5> {
+    let c = 1./sq(δ::<M>());
+    interior::<M,5>(p, Array([
+                                  (xy{x:0, y:-1}, c.y),
+    (xy{x:-1, y:0}, c.x), (xy{x:0, y:0}, -2.*(c.x+c.y)), (xy{x:-1, y:0}, c.x),
+                                  (xy{x:-1, y:0}, c.y) ]))
+}
+macro_rules! Rows_new_Op_M { ($($Op:ident)+) => ($( #[macro_export] macro_rules! $Op { () => ( $crate::mesh::Rows::new($Op::<M>) ) } )+) } Rows_new_Op_M!(I P Δ);
+macro_rules! rows_Op { ($($Op:ident)+) => ($( #[macro_export] macro_rules! $Op { () => ( $crate::mesh::rows::<_,M,2>($Op::<M>) ) } )+) } rows_Op!(Dx Dy);
+
+type BC = fn(u32)->[(i32, f32); 3];
+pub fn BC<const X: BC, const Y: BC, const M:Mesh>(p:uint2) -> Row<3> {
+    if p.x==0 || p.x==M.x-1 { let t=X(p.x); algebra::map(|i| (xy{x:t[i].0,y:0}, t[i].1)) } // Horizontal boundary condition kernel (and corners)
+    else if p.y==0 || p.y==M.y-1 { let t=Y(p.y); algebra::map(|i| (xy{x:0,y:t[i].0}, t[i].1)) }
+    else { Zero::zero() }
+}
+#[macro_export] macro_rules! BC { ($X:ident, $Y:ident) => ( $crate::mesh::Rows::new(($crate::mesh::BC::<$X,$Y,M>)) ) }
+#[macro_export] macro_rules! rows_BC { ($X:ident, $Y:ident) => ( $crate::mesh::rows::<_,M,3>($crate::mesh::BC::<$X,$Y,M>) ) }
