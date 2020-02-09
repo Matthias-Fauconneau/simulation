@@ -1,8 +1,7 @@
 #![allow(non_snake_case)]
-use {framework::{core::{Zero,array::Iterator},vector::{int2,uint2,size2}},crate::algebra::{self,Idx,Array}};
+use {framework::{core::{Zero,div_rem,array::Iterator},vector::{int2,uint2,size2}},crate::algebra::{self,Idx,Array}};
 pub type Mesh = size2;
 pub const fn N(M:Mesh) -> usize { (M.x*M.y) as usize }
-fn div_rem(n : u32, d : u32) -> (u32, u32) { (n/d, n%d) }
 pub fn mesh<const M:Mesh>(i:Idx) -> uint2 { let (div, rem) = div_rem(i as u32,M.x); xy{x:rem, y:div} }
 fn dmesh<const M:Mesh>(p: uint2, d: int2) -> u32 { ((p.y as i32+d.y) as u32)*M.x+(p.x as i32+d.x) as u32 }
 
@@ -139,11 +138,20 @@ pub fn Δ<const M:Mesh>(p:uint2) -> Row<5> {
 macro_rules! Rows_new_Op_M { ($($Op:ident)+) => ($( #[macro_export] macro_rules! $Op { () => ( $crate::mesh::Rows::new($Op::<M>) ) } )+) } Rows_new_Op_M!(I P Δ);
 macro_rules! rows_Op { ($($Op:ident)+) => ($( #[macro_export] macro_rules! $Op { () => ( $crate::mesh::rows::<_,M,2>($Op::<M>) ) } )+) } rows_Op!(Dx Dy);
 
-type BC = fn(u32)->[(i32, f32); 3];
+/*type BC = fn(u32)->[(i32, f32); 3];
 pub fn BC<const X: BC, const Y: BC, const M:Mesh>(p:uint2) -> Row<3> {
     if p.x==0 || p.x==M.x-1 { let t=X(p.x); algebra::map(|i| (xy{x:t[i].0,y:0}, t[i].1)) } // Horizontal boundary condition kernel (and corners)
     else if p.y==0 || p.y==M.y-1 { let t=Y(p.y); algebra::map(|i| (xy{x:0,y:t[i].0}, t[i].1)) }
     else { Zero::zero() }
 }
 #[macro_export] macro_rules! BC { ($X:ident, $Y:ident) => ( $crate::mesh::Rows::new(($crate::mesh::BC::<$X,$Y,M>)) ) }
-#[macro_export] macro_rules! rows_BC { ($X:ident, $Y:ident) => ( $crate::mesh::rows::<_,M,3>($crate::mesh::BC::<$X,$Y,M>) ) }
+#[macro_export] macro_rules! rows_BC { ($X:ident, $Y:ident) => ( $crate::mesh::rows::<_,M,3>($crate::mesh::BC::<$X,$Y,M>) ) }*/
+#[macro_export] macro_rules! BCxy { ($X:ident, $Y:ident) => (
+    {fn BCxy<const M:Mesh>(p:uint2) -> $crate::mesh::Row<3> {
+        if p.x==0 || p.x==M.x-1 { let t=$X::<{1./(M.y as f32)},{1./(M.x as f32)}>(p.x); algebra::map(|i| (xy{x:t[i].0,y:0}, t[i].1)) } // Vertical boundary condition kernel (and corners)
+        else if p.y==0 || p.y==M.y-1 { let t=$Y::<{1./(M.x as f32)},{1./(M.y as f32)}>(p.y); algebra::map(|i| (xy{x:0,y:t[i].0}, t[i].1)) } // Horizontal boundary condition kernel (+corners)
+        else { Zero::zero() }
+    } BCxy::<M> }
+)}
+#[macro_export] macro_rules! BC { ($X:ident, $Y:ident) => ( $crate::mesh::Rows::new($crate::BCxy!($X,$Y)) )  }
+#[macro_export] macro_rules! rows_BC { ($X:ident, $Y:ident) => ( $crate::mesh::rows::<_,M,3>($crate::BCxy!($X,$Y)) ) }

@@ -1,44 +1,59 @@
-use framework::{log, vector::{xy,uint2,size2}, image::bgra8, window::{Widget,Target}};
-fn min(x: &[f32]) -> &f32 { x.iter().min_by(|a, b| a.partial_cmp(b).expect("NaN")).unwrap() }
-fn max(x: &[f32]) -> &f32 { x.iter().max_by(|a, b| a.partial_cmp(b).expect("NaN")).unwrap() }
+use framework::{log, core::{abs,div_rem}, vector::{xy,uint2,size2,vec2,norm,atan}, image::{sRGB::sRGB, bgra8}, window::{Widget,Target}, color::LCh};
+trait From<T> { fn from(t: T) -> Self; }
+impl From<vec2> for bgra8 { fn from(v: vec2) -> Self { std::convert::Into::into(LCh{L:norm(v), C:norm(v), h:atan(v)+std::f32::consts::PI}) } }
+trait Into<T> { fn into(self) -> T; }
+impl<T,S> Into<T> for S where T:From<Self> { fn into(self) -> T { T::from(self) } }
+trait TryMax<T> : Iterator<Item=T> { fn try_max(self) -> Self::Item; }
+impl<I,T:PartialOrd> TryMax<T> for I where Self:Iterator<Item=T> { fn try_max(self) -> Self::Item { self.max_by(|a, b| a.partial_cmp(b).expect("NaN")).unwrap() } }
 
-pub struct Field<'t> {pub size:size2, pub values:&'t [f32] }
-impl std::ops::Index<uint2> for Field<'_> { type Output=f32; fn index(&self, xy{x,y}:uint2) -> &Self::Output { &self.values[(y*self.size.x+x) as usize] } }
+pub enum Field<'t> { Positive(&'t [f32]), Scalar(&'t [f32]), XY(&'t [vec2]) }
 
 pub trait Solution {
-    fn current(&self) -> Field<'_>;
+    fn output(&self) -> (size2, [Field<'_>; 4]);
     fn step(&mut self);
 }
 
 pub struct View<T>(pub T);
 impl<T:Solution> Widget for View<T> {
-    fn size(&mut self, size : size2) -> size2 { (size.y/2).into() }
+    fn size(&mut self, size : size2) -> size2 { xy{x:size.y,y:size.y} }
     fn render(&mut self, target : &mut Target) {
         self.0.step(); // FIXME: async
-        let field = self.0.current();
-        let min = min(field.values);
-        let max = max(field.values);
-        log!(min, max);
-        //let time = std::time::Instant::now();
-        let size = target.size;
-        if max > min { target.set(|p| {
-            let v = (field[p*field.size/size]-min)/(max-min);
-            assert!(v >= 0. && v<= 1., v);
-            let s = framework::image::sRGB::sRGB(v);
-            //let a = framework::image::sRGB::sRGB(f32::min(abs(c),1.));
-            //if c>0. { bgra8{b : 0, g : a, r : a, a : 0xFF} } else { bgra8{b : a, g : a, r : 0, a : 0xFF} }
-            bgra8{b:s, g:s, r:s, a:0xFF}
-        }); }
-        //log!(time.elapsed().as_millis()); let time = std::time::Instant::now();
-        //print!("{} ",time.elapsed().as_millis()); use std::io::{Write,stdout}; stdout().flush().unwrap();
-        //Ok(())
+        let (field_size, outputs) = self.0.output();
+        for i in 0..outputs.len() {
+            let mut target = { let size = target.size/2; let (div,rem) = div_rem(i as u32,2); target.slice_mut(xy{x:rem, y:div}*size, size) };
+            let index = {let target_size=target.size; move |p:uint2| -> usize { let xy{x,y} = p*field_size/target_size; (y*field_size.x+x) as usize }};
+            match outputs[i as usize] {
+                Field::Positive(field) => {
+                    let max = field.iter().try_max();
+                    log!(max);
+                    target.set(|p| {
+                        let s = sRGB( field[index(p)] / max );
+                        bgra8{b:s, g:s, r:s, a:0xFF}
+                    });
+                }
+                Field::Scalar(field) => {
+                    let max = field.iter().map(|v|abs(*v)).try_max();
+                    log!(max);
+                    target.set(|p| {
+                        let v = field[index(p)];
+                        let s = sRGB( abs(v) / max );
+                        if v>0. {bgra8{b:0, g:s, r:s, a:0xFF}} else {bgra8{b:s, g:s, r:0, a:0xFF}}
+                    });
+                }
+                Field::XY(field) => {
+                    let max = field.iter().map(|v|norm(*v)).try_max();
+                    log!(max);
+                    target.set(|p| { self::Into::into((1./max)*field[index(p)]) });
+                }
+            }
+        }
     }
 }
 
 #[macro_export] macro_rules! View { (Simulation::<M>::new($($args:expr),+)) => ({
         struct Instance<const MX:u32, const MY:u32>(Simulation::<{xy{x:MX,y:MY}}>);
         impl<const MX:u32, const MY:u32> Solution for Instance<MX,MY> {
-            fn current(&self) -> $crate::view::Field<'_> { self.0.current() }
+            fn output(&self) -> (size2, [$crate::view::Field<'_>; 4]) { self.0.output() }
             fn step(&mut self) { self.0.step() }
         }
         View(Instance::<{M.x},{M.y}>(Simulation::new($($args),+)))

@@ -132,7 +132,6 @@ impl Solve<f32> for LU {
         let status = unsafe{umfpack::umfpack_di_solve(umfpack::UMFPACK_A as i32, self.column_pointers.as_ptr(), self.row_indices.as_ptr(), self.values.as_ptr(), x.as_mut_ptr(), b.as_ptr(), self.numeric, std::ptr::null(), std::ptr::null_mut())};
         assert!(status == 0, "solve", status);
         map(|i| x[i] as f32)
-        //map(|i| b[i] as f32)
     }
 }
 
