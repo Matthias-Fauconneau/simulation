@@ -35,7 +35,7 @@ impl<const K:usize> std::ops::Mul<Row<K>> for f32 {
     fn mul(self, b: Row<K>) -> Self::Output { Array(Iterator::collect(b.iter().map(|(d,v)|(*d,self**v)))) }
 }
 
-pub type Rows<'a, const M:Mesh, const K:usize> = crate::compose::BoxFn<'a,(uint2,),Row<K>>;
+pub type Rows<'t, const M:Mesh, const K:usize> = crate::compose::BoxFn<'t,(uint2,),Row<K>>;
 pub fn rows<F:Fn(uint2)->Row<K>, const M:Mesh, const K:usize>(f : F) -> impl /*algebra::Rows<{N(M)},{K}>*/ Fn(Idx)->algebra::Row<K> {
     move |i| {
         let p = mesh::<M>(i);

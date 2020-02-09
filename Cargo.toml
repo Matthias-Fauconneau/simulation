@@ -9,4 +9,4 @@ links = "umfpack"
 bindgen = ""
 
 [dependencies]
-framework = { path = "framework", features = ["array_collect", "const_vector", "window", "text"] }
+framework = { path = "framework", features = ["array_collect", "const_vector", "window", "sRGB"] } #"text"

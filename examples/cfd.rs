@@ -5,10 +5,10 @@ impl<T:Zero, const M:Mesh> Quantity<T,M> { fn new<U0:Fn(uint2)->T>(u0: U0) -> Se
 impl<T:Copy+Add+Sum, const M:Mesh> Quantity<T,M> where f32:Mul<T>, LU:Solve<T> {
     fn step<G:Fn(Idx)->T>(&mut self, equation:&Equation<M>, δt:f32, g:&G) where T:Sub {
         // 2-step Adams-Bashforth:  y[2] = y[1] + 3/2·δt·f(t[1],y[1]) - 1/2·δt·f(t[0],y[0])
-        let time = std::time::Instant::now();
+        //let time = std::time::Instant::now();
         fn mul(a:f32, b:f32) -> f32 { a*b }
         self.u = equation.A.solve(|i| dot(&(equation.B)(i), &self.u) + (mul(3.,δt)/2.)*self.f[1][i] - (δt/2.)*self.f[0][i] + g(i));
-        log!("solve", time.elapsed().as_millis());
+        //log!("solve", time.elapsed().as_millis());
     }
     fn advect(&mut self, v : &xy<Field<f32,M>>) {
         self.f.swap(0, 1);
@@ -61,27 +61,27 @@ impl<const M:Mesh> State<M> {
         // Solves implicit evolution
         let Self{φ, T, ω, C} = self;
         let mut T0 : Field<f32,M> = T.u.clone();
-        let time = std::time::Instant::now();
+        //let time = std::time::Instant::now();
         T.step(&system.T, system.δt, &|_|0.);
-        log!("T", time.elapsed().as_millis()); let time = std::time::Instant::now();
+        //log!("T", time.elapsed().as_millis()); let time = std::time::Instant::now();
         for i in 0..mesh::N(M) { T0[i] = system.ωT*(T0[i]+T.u[i]); } let T12=T0;
         let mut φp : Field<f32,M> = Zero::zero(); // fixme: may be uninitialized
         for i in 0..mesh::N(M) { φp[i] = 2.*φ[1][i]-φ[0][i]; }
         ω.step(&system.ω, system.δt, &|i| dot(&Dx!()(i),&T12) + dot(&rows_BC!(Thom,Thom)(i), &φp));
-        log!("w", time.elapsed().as_millis()); let time = std::time::Instant::now();
+        //log!("w", time.elapsed().as_millis()); let time = std::time::Instant::now();
         C.step(&system.C, system.δt, &Self::C_BC);
-        log!("C", time.elapsed().as_millis()); let time = std::time::Instant::now();
+        //log!("C", time.elapsed().as_millis()); let time = std::time::Instant::now();
         // Evaluates explicit advection
         φ.swap(0, 1); φ[1]=system.φ.A.solve(|i|dot(&(system.φ.B)(i),&ω.u));
-        log!("φ", time.elapsed().as_millis()); let time = std::time::Instant::now();
+        //log!("φ", time.elapsed().as_millis()); let time = std::time::Instant::now();
         let v = &xy{x:map(|i|dot(&Dy!()(i),&φ[1])), y: map(|i|-dot(&Dx!()(i),&φ[1]))};
-        log!("v", time.elapsed().as_millis()); let time = std::time::Instant::now();
+        //log!("v", time.elapsed().as_millis()); let time = std::time::Instant::now();
         T.advect(v);
-        log!("T advect", time.elapsed().as_millis()); let time = std::time::Instant::now();
+        //log!("T advect", time.elapsed().as_millis()); let time = std::time::Instant::now();
         ω.advect(v);
-        log!("w advect", time.elapsed().as_millis()); let time = std::time::Instant::now();
+        //log!("w advect", time.elapsed().as_millis()); let time = std::time::Instant::now();
         C.advect(v);
-        log!("explicit C", time.elapsed().as_millis());
+        //log!("explicit C", time.elapsed().as_millis());
    }
 }
 

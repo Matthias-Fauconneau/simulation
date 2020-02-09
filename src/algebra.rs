@@ -21,7 +21,7 @@ impl<T:std::iter::Sum<<f32 as Mul<Self>>::Output>> Sum for T where f32:Mul<Self>
 pub type Row<const C:usize> = Array<(u32,f32), C>;
 pub fn dot<T:Copy+Sum,const R:usize, const C:Len>(a:&Row<C>, b:&Array<T,R>) -> T where f32:Mul<T> { a.iter().map(|(j, v)| *v*b[*j as usize]).sum() }
 pub trait Vector<T=f32,const N:Len> = Fn(Idx)->T;
-pub fn mul<'a, T:Copy+Sum, F:Rows<R,C>, const R:usize, const C:Len>(a:&'a F, b:&'a Array<T,R>) -> impl Vector<T,R> + 'a where f32:Mul<T> {
+pub fn mul<'t, T:Copy+Sum, F:Rows<R,C>, const R:usize, const C:Len>(a:&'t F, b:&'t Array<T,R>) -> impl Vector<T,R>+'t where f32:Mul<T> {
     move |i|->T { dot(&a(i),b) }
 }
 /*impl<T:Copy+Sum,const R:usize, const C:Len> Mul<&Array<T,R>> for &Rows<R,C> where f32:Mul<T> {
@@ -56,7 +56,7 @@ impl LU {
         let mut column_pointers : Vec<i32> = vec!(0;C+1);
         let mut row_indices : Vec<i32> = Vec::with_capacity(C*R);
         let mut values : Vec<f64> = Vec::with_capacity(C*R);
-        let time = std::time::Instant::now();
+        //let time = std::time::Instant::now();
         for j in 0..C {
             column_pointers[j] = values.len() as i32;
             for (i, v) in A(j).iter() {
@@ -74,7 +74,7 @@ impl LU {
         let mut numeric : *mut std::os::raw::c_void = std::ptr::null_mut();
         unsafe{umfpack::umfpack_di_numeric(column_pointers.as_ptr(), row_indices.as_ptr(), values.as_ptr(), symbolic, &mut numeric, std::ptr::null(), std::ptr::null_mut())};
         //framework::log!("numeric", time.elapsed().as_millis());
-        framework::log!("LU", time.elapsed().as_millis());
+        //framework::log!("LU", time.elapsed().as_millis());
         Self{column_pointers, row_indices, values, numeric}
     }
 }
