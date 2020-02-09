@@ -1,35 +1,105 @@
 #![allow(non_snake_case)]
 use {framework::{core::{Zero,array::Iterator},vector::{int2,uint2,size2}},crate::algebra::{self,Idx,Array}};
 pub type Mesh = size2;
-pub const fn N(M:Mesh) -> algebra::Len { (M.x*M.y) as algebra::Len }
-fn div_remu(n : u32, d : u32) -> (u32, u32) { (n/d, n%d) }
-pub fn mesh<const M:Mesh>(i:Idx) -> uint2 { div_remu(i as u32,M.x).into() }
+pub const fn N(M:Mesh) -> usize { (M.x*M.y) as usize }
+fn div_rem(n : u32, d : u32) -> (u32, u32) { (n/d, n%d) }
+pub fn mesh<const M:Mesh>(i:Idx) -> uint2 { let (div, rem) = div_rem(i as u32,M.x); xy{x:rem, y:div} }
 fn dmesh<const M:Mesh>(p: uint2, d: int2) -> u32 { ((p.y as i32+d.y) as u32)*M.x+(p.x as i32+d.x) as u32 }
 
 pub type Field<T=f32,const M:Mesh> = Array<T,{N(M)}>;
 pub fn map<T,F:Fn(uint2)->T,const M:Mesh>(f: F) -> Field<T,M> { algebra::map(|i|f(mesh::<M>(i))) }
 
-pub type Row<const K:usize> = Array<(int2,f32), K>;
-impl<const A:usize, const B:usize> std::ops::Add<Row<B>> for Row<A> {
-    type Output=Row<{A+B}>;
-    fn add(self, mut b: Row<B>) -> Self::Output where Self::Output: {
-        let mut m : Self::Output = Zero::zero();
-        let mut a = self;
-        for i in 0..a.len() { m[            i]=a[i]; for j in 0..b.len() { if b[j].0==a[i].0 { m[            i].1+=b[j].1; b[j]=Zero::zero(); } } }
-        for i in 0..b.len() { m[a.len()+i]=b[i]; for j in 0..a.len() { if a[j].0==b[i].0 { m[a.len()+i].1+=a[j].1; a[j]=Zero::zero(); } } }
-        m
+/*pub trait Op<const KA:usize, const KB:usize> { type Output; fn op<const OP:fn(f32,f32)->f32>(A : Row<KA>, B: Row<KB>) -> Self::Output; }
+impl<const KA:usize, const KB:usize> Op<KA,KB> for Row<KA> {
+    type Output = Row<{KA+KB}>;
+    fn op<const OP:fn(f32,f32)->f32>(A : Row<KA>, B: Row<KB>) -> Self::Output {
+        let mut R : Self::Output = Zero::zero(); // fixme: may be uninitialized
+        let (mut a, mut b, mut r) = (0,0,0);
+        loop {
+            if a < A.len() {
+                if b < B.len() {
+                    if A[a].0 < B[b].0 { R[r] = A[a]; a+=1; r+=1; }
+                    else if B[b].0 < A[a].0 { R[r] = (B[b].0, OP(0.,B[b].1)); b+=1; r+=1; }
+                    else { R[r] = (A[a].0, OP(A[a].1,B[b].1)); a+=1; b+=1; r+=1; }
+                } else {
+                    while a < A.len() { R[r] = A[a]; a+=1; r+=1; }
+                    break;
+                }
+            } else {
+                while b < B.len() { R[r] = (B[b].0, OP(0.,B[b].1)); b+=1; r+=1; }
+                break;
+            }
+        }
+        if r < KA+KB/*R.len()*/ { R[r] = Zero::zero(); } // Zero terminate
+        R
     }
+}
+
+pub type Row<const K:usize> = Array<(int2,f32), K>;
+impl<const A:usize, const B:usize> std::ops::Add<Row<B>> for Row<A> where Self:Op<A,B> {
+    type Output=<Self as Op<A,B>>::Output;
+    fn add(self, b: Row<B>) -> Self::Output { fn add(a:f32,b:f32)->f32{a+b} Row::op::<add>(self, b) }
 }
 impl<const A:usize, const B:usize> std::ops::Sub<Row<B>> for Row<A> {
-    type Output=Row<{A+B}>;
-    fn sub(self, mut b: Row<B>) -> Self::Output where Self::Output: {
-        let mut m : Self::Output = Zero::zero();
-        let mut a = self;
-        for i in 0..a.len() { m[            i]=a[i]; for j in 0..b.len() { if b[j].0==a[i].0 { m[            i].1-=b[j].1; b[j]=Zero::zero(); } } }
-        for i in 0..b.len() { m[a.len()+i]=b[i]; for j in 0..a.len() { if a[j].0==b[i].0 { m[a.len()+i].1=a[j].1-m[a.len()+i].1; a[j]=Zero::zero(); } } }
-        m
+    type Output=<Self as Op<A,B>>::Output;
+    fn sub(self, b: Row<B>) -> Self::Output where Self::Output: { fn sub(a:f32,b:f32)->f32{a-b} Row::op::<sub>(self,b) }
+}*/
+
+pub type Row<const K:usize> = Array<(int2,f32), K>;
+impl<const KA:usize, const KB:usize> std::ops::Add<Row<KB>> for Row<KA> {
+    type Output = Row<{KA+KB}>;
+    fn add(self, B: Row<KB>) -> Self::Output {
+        fn OP(a:f32,b:f32)->f32{a+b}
+        let A = self;
+        let mut R : Self::Output = Zero::zero(); // fixme: may be uninitialized
+        let (mut a, mut b, mut r) = (0,0,0);
+        loop {
+            if a < A.len() {
+                if b < B.len() {
+                    if A[a].0 < B[b].0 { R[r] = A[a]; a+=1; r+=1; }
+                    else if B[b].0 < A[a].0 { R[r] = (B[b].0, OP(0.,B[b].1)); b+=1; r+=1; }
+                    else { R[r] = (A[a].0, OP(A[a].1,B[b].1)); a+=1; b+=1; r+=1; }
+                } else {
+                    while a < A.len() { R[r] = A[a]; a+=1; r+=1; }
+                    break;
+                }
+            } else {
+                while b < B.len() { R[r] = (B[b].0, OP(0.,B[b].1)); b+=1; r+=1; }
+                break;
+            }
+        }
+        if r < KA+KB/*R.len()*/ { R[r] = Zero::zero(); } // Zero terminate
+        R
     }
 }
+impl<const KA:usize, const KB:usize> std::ops::Sub<Row<KB>> for Row<KA> {
+    type Output = Row<{KA+KB}>;
+    fn sub(self, B: Row<KB>) -> Self::Output where Self::Output: {
+        fn OP(a:f32,b:f32)->f32{a-b}
+        let A = self;
+        let mut R : Self::Output = Zero::zero(); // fixme: may be uninitialized
+        let (mut a, mut b, mut r) = (0,0,0);
+        loop {
+            if a < A.len() {
+                if b < B.len() {
+                    if A[a].0 < B[b].0 { R[r] = A[a]; a+=1; r+=1; }
+                    else if B[b].0 < A[a].0 { R[r] = (B[b].0, OP(0.,B[b].1)); b+=1; r+=1; }
+                    else { R[r] = (A[a].0, OP(A[a].1,B[b].1)); a+=1; b+=1; r+=1; }
+                } else {
+                    while a < A.len() { R[r] = A[a]; a+=1; r+=1; }
+                    break;
+                }
+            } else {
+                while b < B.len() { R[r] = (B[b].0, OP(0.,B[b].1)); b+=1; r+=1; }
+                break;
+            }
+        }
+        if r < KA+KB/*R.len()*/ { R[r] = Zero::zero(); } // Zero terminate
+        R
+    }
+}
+
+
 impl<const K:usize> std::ops::Mul<Row<K>> for f32 {
     type Output=Row<K>;
     fn mul(self, b: Row<K>) -> Self::Output { Array(Iterator::collect(b.iter().map(|(d,v)|(*d,self**v)))) }
@@ -47,7 +117,7 @@ pub fn rows<F:Fn(uint2)->Row<K>, const M:Mesh, const K:usize>(f : F) -> impl /*a
 pub struct Equation<const M:Mesh> {pub A : algebra::LU, pub B : Box<dyn algebra::Rows<{N(M)},6>>} // Ax = Bx' + ...
 impl<const M:Mesh> Equation<M> {
     pub fn new<A:Fn(uint2)->Row<KA>, B:Fn(uint2)->Row<6>+'static, const KA:usize>(A:A, B:B) -> Self {
-        Self{A: algebra::LU::new(N(M), rows::<_,M,KA>(A)), B: box rows::<_,M,6>(B)}
+        Self{A: algebra::LU::new(/*N(M),*/ &algebra::columns::<_,KA,{N(M)},6>(rows::<_,M,KA>(A))), B: box rows::<_,M,6>(B)}
     }
 }
 
@@ -63,8 +133,8 @@ pub fn Δ<const M:Mesh>(p:uint2) -> Row<5> {
     let c = 1./sq(δ::<M>());
     interior::<M,5>(p, Array([
                                   (xy{x:0, y:-1}, c.y),
-    (xy{x:-1, y:0}, c.x), (xy{x:0, y:0}, -2.*(c.x+c.y)), (xy{x:-1, y:0}, c.x),
-                                  (xy{x:-1, y:0}, c.y) ]))
+    (xy{x:-1, y:0}, c.x), (xy{x:0, y:0}, -2.*(c.x+c.y)), (xy{x:1, y:0}, c.x),
+                                  (xy{x:0, y:1}, c.y) ]))
 }
 macro_rules! Rows_new_Op_M { ($($Op:ident)+) => ($( #[macro_export] macro_rules! $Op { () => ( $crate::mesh::Rows::new($Op::<M>) ) } )+) } Rows_new_Op_M!(I P Δ);
 macro_rules! rows_Op { ($($Op:ident)+) => ($( #[macro_export] macro_rules! $Op { () => ( $crate::mesh::rows::<_,M,2>($Op::<M>) ) } )+) } rows_Op!(Dx Dy);
