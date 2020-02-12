@@ -5,7 +5,7 @@ pub trait Add<T=Self> = std::ops::Add<T,Output=T>;
 pub trait Sub<T=Self> = std::ops::Sub<T,Output=T>;
 pub trait Mul<T> = std::ops::Mul<T,Output=T>;
 pub use framework::{core::{Zero,Result,mask,abs,cb,sqrt},log,vector::{xy,uint2,size2,int2,vec2}};
-mod compose;
+mod function;
 pub mod algebra; pub use algebra::{Idx,map,Sum,dot,v2,LU,Solve};
 pub mod mesh; pub use mesh::{Mesh,mesh,Field,Equation,I,P,Δ,Dx,Dy,border};
 #[allow(non_snake_case)] pub mod SI;

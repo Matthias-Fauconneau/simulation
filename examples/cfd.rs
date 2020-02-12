@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 #![allow(incomplete_features,non_snake_case)]#![feature(const_generics,non_ascii_idents,const_fn)]use simulation::*;
 
 struct Quantity<T=f32,const M:Mesh> { u : Field<T,M>, f : [Field<T,M>; 2] }
@@ -55,7 +54,8 @@ struct State<const M:Mesh> {
 
 impl<const M:Mesh> State<M> {
     fn C0(p:uint2) -> v2<f32> { let v = p.as_f32() / (M - 1.into()).as_f32(); v2(v.x, v.y) }
-    fn new() -> Self { Self{φ:Zero::zero(), T:Quantity::new(|_|0.), ω:Quantity::new(|_|0.), C:Quantity::new(Self::C0) } }
+    //fn new() -> Self { Self{φ:Zero::zero(), T:Quantity::new(|_|0.), ω:Quantity::new(|_|0.), C:Quantity::new(Self::C0) } }
+    fn new() -> Self { Self{φ:Zero::zero(), T:Quantity::new(|p|p.x as f32 / M.x as f32), ω:Quantity::new(|_|0.), C:Quantity::new(Self::C0) } } // Easier to debug more continuous
     fn C_BC(i:Idx) -> v2<f32> { let p = mesh::<M>(i); mask(border::<M>(p), Self::C0(p)) }
     fn step(&mut self, system : &System<M>) {
         // Solves implicit evolution
@@ -68,10 +68,10 @@ impl<const M:Mesh> State<M> {
         C.step(&system.C, system.δt, &Self::C_BC);
         // Evaluates explicit advection
         φ.swap(0, 1); φ[1]=system.φ.A.solve(|i|dot(&(system.φ.B)(i),&ω.u));
-        /*let v = &xy{x:map(|i|dot(&Dy!()(i),&φ[1])), y: map(|i|-dot(&Dx!()(i),&φ[1]))};
-        //T.advect(v);
-        //ω.advect(v);
-        //C.advect(v);*/
+        let v = &xy{x:map(|i|dot(&Dy!()(i),&φ[1])), y: map(|i|-dot(&Dx!()(i),&φ[1]))};
+        T.advect(v);
+        ω.advect(v);
+        C.advect(v);
    }
 }
 

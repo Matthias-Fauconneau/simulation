@@ -25,7 +25,7 @@ impl<T:Solution> Widget for View<T> {
             match outputs[i as usize] {
                 Field::Positive(field) => {
                     let max = field.iter().try_max();
-                    log!(max);
+                    log!(i,"+",max);
                     target.set(|p| {
                         let s = sRGB( field[index(p)] / max );
                         bgra8{b:s, g:s, r:s, a:0xFF}
@@ -33,7 +33,8 @@ impl<T:Solution> Widget for View<T> {
                 }
                 Field::Scalar(field) => {
                     let max = field.iter().map(|v|abs(*v)).try_max();
-                    log!(max);
+                    if max == 0. {continue;}
+                    log!(i,"~",max);
                     target.set(|p| {
                         let v = field[index(p)];
                         let s = sRGB( abs(v) / max );
@@ -42,7 +43,8 @@ impl<T:Solution> Widget for View<T> {
                 }
                 Field::XY(field) => {
                     let max = field.iter().map(|v|norm(*v)).try_max();
-                    log!(max);
+                    if max == 0. {continue;}
+                    log!(i,".",max);
                     target.set(|p| { self::Into::into((1./max)*field[index(p)]) });
                 }
             }
